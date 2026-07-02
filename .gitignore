@@ -25,5 +25,11 @@ commands/*.log
 
 # Ignore large zip files
 *.zip
-# Ignore database files (optional, but peq_local.db is 63MB)
-# *.db
+# Ignore database files
+*.db
+*.db-shm
+*.db-wal
+
+# Ignore generated status jsons and logs
+commands/*.status.json
+transcript_dump.txt
