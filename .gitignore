@@ -33,3 +33,8 @@ commands/*.log
 # Ignore generated status jsons and logs
 commands/*.status.json
 transcript_dump.txt
+
+# Ignore INI, CFG, and mock files
+*.ini
+*.cfg
+*mock*
