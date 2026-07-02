@@ -38,3 +38,16 @@ transcript_dump.txt
 *.ini
 *.cfg
 *mock*
+
+# OS generated files
+desktop.ini
+Thumbs.db
+ehthumbs.db
+.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
