@@ -1,0 +1,54 @@
+| form_raid.mac
+| This macro uses EQBC to assemble your groups and raid automatically.
+| Usage: Target your game window and type: /mac form_raid
+
+sub Main
+    /echo ==============================
+    /echo Form Raid Macro Started...
+    /echo ==============================
+    
+    | 1. Disband everyone just in case they are stuck in weird groups
+    /bcaa //target ${Me}
+    /delay 5
+    /bcaa //disband
+    /delay 5
+    /bcaa //raiddisband
+    /delay 2s
+    
+    | 2. Tell group leaders to invite their group members
+    /echo Forming Melee Group...
+    /bct sixofseven //invite maschada
+    /bct sixofseven //invite chair
+    /bct sixofseven //invite wantsit
+    /bct sixofseven //invite bonko
+    /bct sixofseven //invite sleepy
+    
+    /echo Forming BuffsGalore Group...
+    /bct droidica //invite frog
+    /bct droidica //invite bracer
+    /bct droidica //invite tinydancer
+    
+    /echo Forming SpellDmg Group...
+    /bct eifel //invite tschubakabra
+    /bct eifel //invite bose
+    
+    /delay 3s
+    
+    | 3. Tell everyone to accept group invites
+    /bca //invite
+    /delay 3s
+    
+    | 4. sixofseven forms the raid and invites group leaders
+    /echo Forming Raid...
+    /bct sixofseven //raidinvite droidica
+    /bct sixofseven //raidinvite eifel
+    
+    /delay 3s
+    
+    | 6. Tell everyone to accept raid invites
+    /bca //yes
+    
+    /echo ==============================
+    /echo Raid successfully formed!
+    /echo ==============================
+/return

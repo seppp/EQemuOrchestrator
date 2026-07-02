@@ -1,0 +1,33 @@
+# Agent Instructions
+
+- Do not run verifications automatically.
+- Always ask the user first if they want to perform verifications manually, and let them decide between automated or manual verification.
+
+## Project Context & Architecture
+
+### 1. Databases
+- **Remote MariaDB**: Main server database is `peq` on host `192.168.178.163`. Connection settings are in [config.json](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/config.json).
+- **Local SQLite Cache**: [peq_local.db](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/peq_local.db) cache is synchronized using [db_sync.py](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/db_sync.py) (primarily legacy but kept for syncing reference).
+- **Project Schema Files**:
+  - MySQL/MariaDB schema dump: [schema.sql](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/schema.sql)
+  - Detailed schema documentation: [db_schema.md](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/db_schema.md)
+
+### 2. AutoLogin & Account Architecture
+- **Login Server Accounts**: Stored in the `login_accounts` table. Default password is `"a"`, stored using scrypt hashing (e.g. `$7$C6....`).
+- **World Server Account Mapping**: Active characters in `character_data` must map to `local` accounts in the `account` table (`ls_id = 'local'` and `lsaccount_id = <login_server_id>`). Mismatches will cause characters to not show up on the select screen.
+- **MacroQuest AutoLogin**: Group, profile, and character structures are synchronized from/to MQ's `login.db` (path: `c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\config\login.db`).
+
+### 3. Key Source Files
+- **Orchestrator Backend Server**: [orchestrator.py](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/orchestrator.py) (runs on port `8099`, houses all admin and group launcher web interface).
+- **Character Creator Backend**: [db_char_creator.py](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/db_char_creator.py).
+- **Database CLI Admin**: [db_admin.py](file:///c:/Users/sigha/OneDrive/Documents/eqemus/antigravity/db_admin.py).
+
+### 4. Client IPC / Broadcasting
+- **Native MQ Broadcast Plugins**: The user uses MQ2DanNet for cross-client broadcasting and states. RGMercs heavily relies on DanNet. Commands like `/dge`, `/dga`, and `/bca` (if aliased) are available.
+- **Antigravity Custom Relay**: Cross-client communication from outside the game is handled through antigravity.lua which polls the Orchestrator's /cmd/get HTTP endpoints. Any GM operations sent via the Orchestrator UI use the built-in sendCommand() or sendAsMobsterer() JavaScript functions.
+
+### 5. Automation & Combat Scripts
+- **RGMercs**: We use RGMercs (`rgmercs.lua`) for combat and casting automation instead of the legacy `box_assist.lua`. All bot combat and casting behaviors should be controlled via `/rglua` commands (e.g. `/rglua pause`, `/rglua resume`, `/rglua buff`) or `/lua run rgmercs`. `box_assist.lua` has been completely deprecated.
+
+### 6. MacroQuest Philosophy
+- Use of existing MacroQuest plugins (e.g., MQ2DanNet, MQ2AutoLogin, MQ2Nav, MQ2Melee) is preferable to reinventing the wheel wherever possible. Always check if a plugin natively supports the required functionality before writing custom Lua scripts or Python orchestration logic.

@@ -1,0 +1,29 @@
+# Ignore the entire EverQuest ROF2 Client binaries to save space
+everquest_rof2*
+WinEQ2/
+Launchers/
+patch/
+rof framebuntu/
+mineserv/
+
+# Ignore MacroQuest Heavy binaries except for Macros and config
+MacroQuestRof2/*
+!MacroQuestRof2/Macros/
+!MacroQuestRof2/config/
+
+# Ignore python caches and environment
+__pycache__/
+*.pyc
+.env
+venv/
+
+# Ignore constantly changing command files
+commands/*.cmd
+commands/*.log
+.SynologyWorkingDirectory/*
+.vscode/*
+
+# Ignore large zip files
+*.zip
+# Ignore database files (optional, but peq_local.db is 63MB)
+# *.db
