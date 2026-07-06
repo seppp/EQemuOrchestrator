@@ -45,3 +45,7 @@ trigger: always_on
 - **Roles and AAs**: The Group MA role can be assigned natively without AAs (`/grouproles set Name 2`). The native Raid MA role requires the "Delegate Main Assist" Raid Leadership AA (costs 3 points, accessed via `L` window, requires Leadership Exp to be enabled).
 - **RGMercs Fallback**: If Leadership AAs are missing in a raid, manually set the assist target via command: `/rglua mainassist [CharacterName]`.
 - **Granting Leadership AAs**: Leadership AAs are not stored in the regular AA tables. They are stored in the `character_leadership_abilities` table (slots 1-15).
+
+### 9. MacroQuest Aliases & UI Interactions
+- **Universal Accept (`/yes`)**: The workspace uses a comprehensive custom MacroQuest alias (`/yes`) defined in `MacroQuest_default.ini`. This alias is designed to aggressively click "Yes/Accept/OK" on practically every conceivable EverQuest dialog window (including `ConfirmationDialogBox`, `LargeDialogWindow`, `RaidWindow`, trade windows, etc.). 
+- **Usage**: Always use `mq.cmd("/yes")` (or just `/yes` via EQBC) when you need a bot to accept a group invite, raid invite, resurrection, or click through a disband confirmation box. Do not attempt to write custom `/squelch /notify` UI clicks for these standard dialogs, as the alias already covers the exact button names used by the client UI.

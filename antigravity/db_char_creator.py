@@ -171,19 +171,33 @@ def create_character(name, race_id, class_id, gender_id, deity_id, zone_id=394):
             ))
             char_id = cursor.lastrowid
 
-            # 6. Insert level 1 skills
+            # 6. Insert level 1 skills (unlock with 1 point instead of maxing)
             cursor.execute("SELECT skill_id, cap FROM skill_caps WHERE class_id = %s AND level = 1", (class_id,))
             skills = cursor.fetchall()
             if skills:
                 sql_skill = "INSERT INTO character_skills (id, skill_id, value) VALUES (%s, %s, %s)"
                 skill_data = []
                 for s in skills:
-                    val = s['cap'] if s['cap'] > 0 else 1
+                    val = 1
                     # Give common tongue a solid base value
                     if s['skill_id'] == 40:
                         val = 200
                     skill_data.append((char_id, s['skill_id'], val))
                 cursor.executemany(sql_skill, skill_data)
+
+            # 6.5. Scribe Level 1 Spells
+            # Warrior(1), Monk(7), Rogue(9), Berserker(16) do not have spells
+            if class_id not in (1, 7, 9, 16):
+                col = f"classes{class_id}"
+                cursor.execute(f"SELECT id FROM spells_new WHERE {col} = 1")
+                spells = cursor.fetchall()
+                if spells:
+                    sql_spell = "INSERT INTO character_spells (id, slot_id, spell_id) VALUES (%s, %s, %s)"
+                    spell_data = []
+                    for i, sp in enumerate(spells):
+                        # i is the slot_id (starts at 0)
+                        spell_data.append((char_id, i, sp['id']))
+                    cursor.executemany(sql_spell, spell_data)
 
             # 7. Insert 5 starting bind points
             sql_bind = """

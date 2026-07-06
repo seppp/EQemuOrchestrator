@@ -24,6 +24,7 @@ from db_char_creator import create_character, add_to_mq_login, DEFAULT_EQ_PATH, 
 COMMANDS_DIR = os.path.join(BASE_DIR, "commands")
 
 ACTIVE_SESSIONS = {}
+CRASHED_SESSIONS = set()
 CPU_CORE_INDEX = 2
 MAX_CORES = 32
 
@@ -53,6 +54,89 @@ def ensure_mq_running(silent=False):
                 print("MacroQuest is already running.")
     except Exception as e:
         print(f"Error checking/starting MacroQuest: {e}")
+
+def generate_auto_raid_lua(g1, g2, g3):
+    def lua_array(lst):
+        return "{" + ", ".join(f'"{x}"' for x in lst) + "}"
+    
+    groups_str = f'    ["{g1[0]}"] = {lua_array(g1[1:])},\n    ["{g2[0]}"] = {lua_array(g2[1:])},\n    ["{g3[0]}"] = {lua_array(g3[1:])}'
+    
+    return f"""local mq = require('mq')
+local me = mq.TLO.Me.CleanName()
+
+local raid_leader = "{g1[0]}"
+local g1_leader = "{g1[0]}"
+local g2_leader = "{g2[0]}"
+local g3_leader = "{g3[0]}"
+
+local groups = {{
+{groups_str}
+}}
+
+local function log_msg(msg)
+    print("\\ay[Auto-Raid]\\aw " .. msg)
+    local f = io.open("auto_raid.log", "a")
+    if f then
+        f:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. msg .. "\\n")
+        f:close()
+    end
+end
+
+if me ~= raid_leader then
+    log_msg("This script must be run by the raid leader (" .. raid_leader .. "). Exiting.")
+    return
+end
+
+log_msg("Step 1: Disbanding everyone...")
+mq.cmd("/bcaa //disband")
+mq.cmd("/bcaa //raiddisband")
+mq.delay(2000)
+
+log_msg("Step 2: Forming groups...")
+for leader, members in pairs(groups) do
+    for _, member in ipairs(members) do
+        if leader == raid_leader then
+            log_msg("Inviting " .. member .. " to Group 1")
+            mq.cmdf("/invite %s", member)
+        else
+            log_msg("Commanding " .. leader .. " to invite " .. member .. " to their group")
+            mq.cmdf("/bct %s //invite %s", leader, member)
+        end
+        mq.delay(500)
+        mq.cmdf("/bct %s //invite", member)
+        mq.delay(200)
+    end
+end
+
+mq.delay(1000)
+
+log_msg("Step 3: Forming Raid...")
+local function raid_full()
+    return (mq.TLO.Raid.Members() or 0) >= 18
+end
+
+local attempts = 0
+while not raid_full() and attempts < 10 do
+    log_msg("Inviting group leaders to raid (Attempt " .. (attempts+1) .. ")...")
+    mq.cmdf("/raidinvite %s", g2_leader)
+    mq.cmdf("/raidinvite %s", g3_leader)
+    mq.delay(1000)
+    
+    log_msg("Commanding group leaders to accept raid invite...")
+    mq.cmdf("/bct %s //raidaccept", g2_leader)
+    mq.cmdf("/bct %s //raidaccept", g3_leader)
+    mq.cmd("/bcaa //yes")
+    mq.delay(2000)
+    
+    attempts = attempts + 1
+end
+
+if raid_full() then
+    log_msg("Success! Full raid assembled.")
+else
+    log_msg("Warning! Raid formation may have failed. Only " .. (mq.TLO.Raid.Members() or 0) .. " members in raid.")
+end
+"""
 
 def get_online_characters(max_age=15):
     """Returns a lowercase set of character names that have recently reported status."""
@@ -92,41 +176,21 @@ def watchdog_thread():
                 continue
                 
             if char_name.lower() not in online_chars:
-                print(f"[Watchdog] Detected {char_name} has crashed or is offline. Relaunching...")
-                
-                try:
-                    conn = sqlite3.connect(DEFAULT_LOGIN_DB)
-                    c = conn.cursor()
-                    c.execute("""
-                        SELECT p.custom_client_ini, c.server, c.character
-                        FROM profiles p 
-                        JOIN characters c ON p.character_id = c.id 
-                        WHERE LOWER(c.character) = ?
-                    """, (char_name.lower(),))
-                    row = c.fetchone()
-                    conn.close()
-                    
-                    if row:
-                        custom_ini, server, real_name = row
-                        eq_path = DEFAULT_EQ_PATH
-                        working_dir = os.path.dirname(eq_path)
-                        cmd_str = get_native_launch_cmd(real_name, eq_path, custom_ini, server)
-                        print(f"[Watchdog] Relaunching: {cmd_str}")
-                        subprocess.Popen(cmd_str, shell=True, cwd=working_dir)
-                        # Reset timestamp so we don't spam launch
-                        ACTIVE_SESSIONS[char_name.lower()] = time.time()
-                except Exception as e:
-                    print(f"[Watchdog] Error relaunching {char_name}: {e}")
+                print(f"[Watchdog] {char_name} is offline (logged out or crashed). Removing from active sessions.")
+                CRASHED_SESSIONS.add(char_name.lower())
+                del ACTIVE_SESSIONS[char_name.lower()]
+
+
+MAX_CORES = 16
+CPU_CORE_INDEX = 0
 
 def get_native_launch_cmd(char_name, eq_path, args, server):
     global CPU_CORE_INDEX
-    # Calculate hex mask for the current CPU core (e.g. core 2 -> 0x4)
     affinity_mask = hex(1 << CPU_CORE_INDEX)[2:]
     core_str = str(CPU_CORE_INDEX)
-    
-    # Prevent EQ from overwriting the OS affinity by updating its INI file
     working_dir = os.path.dirname(eq_path)
-    ini_path = os.path.join(working_dir, args) if args else os.path.join(working_dir, "eqclient.ini")
+    ini_path = os.path.join(working_dir, "eqclient.ini")
+
     if os.path.exists(ini_path):
         import re
         try:
@@ -149,17 +213,15 @@ def get_native_launch_cmd(char_name, eq_path, args, server):
                     f.write(new_content)
         except Exception as e:
             print(f"Warning: Could not modify affinity in {ini_path}: {e}")
-    
+
     cmd_str = f'start "" /affinity {affinity_mask} "{eq_path}" patchme'
-    if args:
-        cmd_str += f" {args}"
+    
     if char_name and char_name.lower() != 'mobsterer':
         cmd_str += " nosound"
     if char_name:
         srv = server if server else "dodl"
         cmd_str += f" /login:{srv}:{char_name}"
         
-    # Cycle to the next core
     CPU_CORE_INDEX = (CPU_CORE_INDEX + 1) % MAX_CORES
     return cmd_str
 
@@ -207,6 +269,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     <title>EQ Multi-Group Orchestrator</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
             --bg-main: #0b0c10;
@@ -938,6 +1001,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <button class="tab-btn active" onclick="switchMainTab('tab-char-admin')">Character Admin</button>
                 <button class="tab-btn" onclick="switchMainTab('tab-bot-manager')">Bot Manager</button>
                 <button class="tab-btn" onclick="switchMainTab('tab-macros-configs')">Macros & Configs</button>
+                <button class="tab-btn" onclick="switchMainTab('tab-guides')">Guides</button>
             </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
@@ -1158,6 +1222,35 @@ HTML_CONTENT = """<!DOCTYPE html>
                                     <div class="tooltip">
                                         <button class="btn-ctrl" onclick="pushMacrosToAll()">Push Macros to All</button>
                                         <span class="tooltiptext">Generates social macros for all these buttons onto all characters' hotbars.</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <div class="group-title">AE Farm Control</div>
+                                <div class="buttons-grid">
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl" onclick="launchAECohort()">Launch AE PL Cohort</button>
+                                        <span class="tooltiptext">Launches the 18 AE characters automatically.</span>
+                                    </div>
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl" onclick="formAERaid()">Form AE Raid</button>
+                                        <span class="tooltiptext">Groups all 18 AE characters into a single raid and sets Main Assist.</span>
+                                    </div>
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl" onclick="aeToggleMode(true)">Enable AE Mode</button>
+                                        <span class="tooltiptext">Switches Wizards to AE mode, Bards to twist, and configures Enchanters.</span>
+                                    </div>
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl btn-danger" onclick="aeToggleMode(false)">Disable AE Mode</button>
+                                        <span class="tooltiptext">Reverts to default group modes.</span>
+                                    </div>
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl" style="background-color: var(--color-success); color: var(--bg-main);" onclick="aeStartPulling()">Start AFK Pulling</button>
+                                        <span class="tooltiptext">Tells the SK to wait for buffs, pull, and activates monitors.</span>
+                                    </div>
+                                    <div class="tooltip">
+                                        <button class="btn-ctrl btn-danger" onclick="aeStopAll()">Stop All</button>
+                                        <span class="tooltiptext">Emergency abort: stops pulling and pauses automation.</span>
                                     </div>
                                 </div>
                             </div>
@@ -1708,6 +1801,30 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- ==================== TAB 4: GUIDES ==================== -->
+    <div id="tab-guides" class="main-tab-content">
+        <div class="grid-two-col">
+            <div class="panel">
+                <h3 class="panel-header">Available Guides</h3>
+                <div class="scroll-panel" style="max-height: calc(100vh - 200px);">
+                    <table class="gearing-table" id="guides-table">
+                        <thead>
+                            <tr>
+                                <th>Guide Name</th>
+                            </tr>
+                        </thead>
+                        <tbody id="guides-list">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel" style="overflow-y: auto; max-height: calc(100vh - 120px);">
+                <h3 class="panel-header" id="guide-viewer-title">Guide Viewer</h3>
+                <div id="guide-viewer-content" style="line-height: 1.6;">Select a guide to view.</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let chars = {};
         
@@ -1720,7 +1837,8 @@ HTML_CONTENT = """<!DOCTYPE html>
             const btnMap = {
                 'tab-char-admin': 0,
                 'tab-bot-manager': 1,
-                'tab-macros-configs': 2
+                'tab-macros-configs': 2,
+                'tab-guides': 3
             };
             document.querySelectorAll('.tab-bar > .tab-btn')[btnMap[tabId]].classList.add('active');
             
@@ -1741,6 +1859,8 @@ HTML_CONTENT = """<!DOCTYPE html>
                     const subTabId = onclickStr.match(/'([^']+)'/)[1];
                     switchSubTab(subTabId);
                 }
+            } else if (tabId === 'tab-guides') {
+                loadGuides();
             }
         }
 
@@ -1814,7 +1934,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             if(char) {
                 const oldTarget = document.getElementById('target-char').value;
                 document.getElementById('target-char').value = 'Mobsterer';
-                await sendCommand(`/#summon ${char}`);
+                await sendCommand(`/lua exec mq.cmd('/say #summon ${char}')`);
                 document.getElementById('target-char').value = oldTarget;
             }
         }
@@ -1825,12 +1945,24 @@ HTML_CONTENT = """<!DOCTYPE html>
                 await fetch('/cmd/summon_all', { method: 'POST' });
             } catch(e) { console.error(e); }
         }
+        async function aeToggleMode(enable) {
+            updateHistory('System', 'Toggle AE Mode: ' + (enable ? 'ON' : 'OFF'));
+            try { await fetch('/cmd/ae_toggle', { method: 'POST', body: JSON.stringify({ state: enable }) }); } catch(e) { console.error(e); }
+        }
+        async function aeStartPulling() {
+            updateHistory('System', 'Start AFK Pulling');
+            try { await fetch('/cmd/ae_start', { method: 'POST' }); } catch(e) { console.error(e); }
+        }
+        async function aeStopAll() {
+            updateHistory('System', 'Stop AE Automation');
+            try { await fetch('/cmd/ae_stop', { method: 'POST' }); } catch(e) { console.error(e); }
+        }
         async function gmGoto() {
             const char = await showPrompt("Select character for Mobsterer to TP to:", true);
             if(char) {
                 const oldTarget = document.getElementById('target-char').value;
                 document.getElementById('target-char').value = 'Mobsterer';
-                await sendCommand(`/#goto ${char}`);
+                await sendCommand(`/lua exec mq.cmd('/say #goto ${char}')`);
                 document.getElementById('target-char').value = oldTarget;
             }
         }
@@ -1864,7 +1996,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 
                 // Wait 1 second before casting the spell
                 setTimeout(async () => {
-                    await sendCommand(`/#castspell 994`);
+                    await sendCommand(`/lua exec mq.cmd('/say #castspell 994')`);
                     document.getElementById('target-char').value = oldTarget;
                 }, 1000);
             }
@@ -3878,6 +4010,34 @@ HTML_CONTENT = """<!DOCTYPE html>
             }
         }
 
+        async function checkCrashes() {
+            try {
+                const res = await fetch('/crashes');
+                const data = await res.json();
+                const banner = document.getElementById('crash-banner');
+                const text = document.getElementById('crash-text');
+                if (data.crashes && data.crashes.length > 0) {
+                    text.innerText = data.crashes.length + " character(s) crashed: " + data.crashes.join(", ");
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } catch(e) {}
+        }
+        setInterval(checkCrashes, 5000);
+        checkCrashes();
+
+        async function dismissCrash() {
+            await fetch('/dismiss_crashes', {method: 'POST'});
+            checkCrashes();
+        }
+
+        async function relaunchCrashed() {
+            document.getElementById('crash-text').innerText = "Relaunching...";
+            await fetch('/relaunch_crashes', {method: 'POST'});
+            setTimeout(checkCrashes, 2000);
+        }
+
         // Initialize metadata and polls
         fetchGroups();
         fetchCreatorMetadata();
@@ -3901,6 +4061,66 @@ HTML_CONTENT = """<!DOCTYPE html>
         fetchLaunchableCharacters();
         fetchGroupManagerDetails();
 
+        function launchAECohort() {
+            fetch('/cmd/launch_ae_cohort', {method: 'POST'})
+            .then(r => r.json())
+            .then(d => {
+                addLog("Launching AE PL Cohort... this may take a moment.");
+            }).catch(e => {
+                addLog("Launching AE PL Cohort...");
+            });
+        }
+        
+        function formAERaid() {
+            fetch('/cmd/ae_form_raid', {method: 'POST'});
+        }
+
+        function aeToggleMode(state) {
+            fetch('/cmd/ae_toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({state: state})
+            });
+        }
+
+        function loadGuides() {
+            fetch('/api/guides')
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('guides-list');
+                    list.innerHTML = '';
+                    if (data.guides) {
+                        data.guides.forEach(guide => {
+                            const tr = document.createElement('tr');
+                            tr.style.cursor = 'pointer';
+                            tr.innerHTML = `<td>${guide}</td>`;
+                            tr.onclick = () => {
+                                document.querySelectorAll('#guides-list tr').forEach(row => row.classList.remove('selected'));
+                                tr.classList.add('selected');
+                                loadGuideContent(guide);
+                            };
+                            list.appendChild(tr);
+                        });
+                    }
+                });
+        }
+        
+        function loadGuideContent(name) {
+            document.getElementById('guide-viewer-title').innerText = name;
+            document.getElementById('guide-viewer-content').innerHTML = '<span class="loader"></span> Loading...';
+            fetch('/api/guide_content?name=' + encodeURIComponent(name))
+                .then(r => r.text())
+                .then(md => {
+                    if (typeof marked !== 'undefined') {
+                        document.getElementById('guide-viewer-content').innerHTML = marked.parse(md);
+                    } else {
+                        document.getElementById('guide-viewer-content').innerText = md;
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('guide-viewer-content').innerText = 'Error loading guide: ' + err;
+                });
+        }
     </script>
 </body>
 </html>
@@ -4051,8 +4271,9 @@ def learn_disciplines(char_id):
 
 def train_skills(char_id):
     """
-    Trains all skills to their maximum cap for the character's class and level
-    using skill_caps. Upserts existing values so no skill is lowered below current.
+    Initializes new skills available to the character's class and level to a value of 1,
+    simulating a purchase from a guild trainer. 
+    Upserts existing values so no skill is lowered below current.
     """
     conn = get_connection()
     try:
@@ -4089,7 +4310,7 @@ def train_skills(char_id):
             cursor.executemany(sql_upsert, batch)
             conn.commit()
 
-            return True, f"Trained {len(batch)} skills to cap for {char_name}."
+            return True, f"Initialized {len(batch)} skills to 1 for {char_name}."
     except Exception as e:
         return False, str(e)
     finally:
@@ -4350,23 +4571,34 @@ class EQBCClient:
                 time.sleep(5)
                 
     def send_command(self, cmd):
-        if self.sock:
+        if self.sock and self.running:
             try:
                 self.sock.sendall(f"{cmd}\n".encode('utf-8'))
-            except:
-                pass
+                return True
+            except Exception as e:
+                print(f"EQBC send failed: {e}. Dropping connection to force reconnect.")
+                try:
+                    self.sock.close()
+                except:
+                    pass
+                self.sock = None
+        return False
 
 EQBC_CLIENT = EQBCClient()
 
 def start_eqbcs():
     """Starts the EQBCS server natively."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('127.0.0.1', 2112)) == 0:
+                print("EQBCS (or equivalent) is already listening on port 2112.")
+                return
+    except: pass
+
     eqbcs_path = r"C:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\EQBCS.exe"
     if os.path.exists(eqbcs_path):
         try:
-            out = subprocess.check_output('tasklist /FI "IMAGENAME eq EQBCS.exe"', shell=True).decode()
-            if "EQBCS.exe" in out:
-                print("EQBCS is already running.")
-                return
             print("Starting EQBCS.exe...")
             subprocess.Popen([eqbcs_path], cwd=os.path.dirname(eqbcs_path))
         except Exception as e:
@@ -4374,6 +4606,7 @@ def start_eqbcs():
 
 def write_cmd_global(char, cmd):
     """Broadcasts a command to all characters via EQBC."""
+        
     try:
         for line in cmd.split('\n'):
             line = line.strip()
@@ -4384,13 +4617,18 @@ def write_cmd_global(char, cmd):
         print(f"Error sending global cmd to EQBC: {e}")
 
 def write_cmd(char, cmd):
-    """Sends a command to a specific character via EQBC natively."""
+    """Sends a command to a specific character via EQBC."""
     if char.lower() == "all":
         return write_cmd_global(char, cmd)
         
     try:
         with open(os.path.join(COMMANDS_DIR, "orchestrator_debug.log"), "a") as lf:
-            lf.write(f"[{time.strftime('%H:%M:%S')}] DEBUG: EQBC to {char}: {cmd}\n")
+            lf.write(f"[{time.strftime('%H:%M:%S')}] DEBUG: Cmd to {char}: {cmd}\n")
+    except: pass
+        
+    try:
+        with open(os.path.join(COMMANDS_DIR, "orchestrator_debug.log"), "a") as lf:
+            lf.write(f"[{time.strftime('%H:%M:%S')}] DEBUG: Cmd to {char}: {cmd}\n")
     except: pass
     
     try:
@@ -4408,7 +4646,6 @@ def auto_group_formation_thread(group_id):
     Monitors online status of all members of the group.
     Once all members are online, triggers in-game invitations automatically.
     """
-    return # DISABLED for macro
     print(f"[AutoGroup] Monitoring thread started for group {group_id}")
     start_time = time.time()
     expected_members = []
@@ -4424,7 +4661,7 @@ def auto_group_formation_thread(group_id):
             FROM profiles p 
             JOIN characters c ON p.character_id = c.id 
             WHERE p.group_id = ? 
-            ORDER BY p.sort_order
+            ORDER BY pg.name, p.sort_order
         """, (group_id,))
         expected_members = [row[0].capitalize() for row in c.fetchall()]
         conn.close()
@@ -4470,18 +4707,18 @@ def auto_group_formation_thread(group_id):
             # Send all invites simultaneously
             for i, m in enumerate(other_members):
                 if i < 5:
-                    pass #write_cmd(leader, f"/invite {m}")
+                    write_cmd(leader, f"/invite {m}")
                 else:
-                    pass #write_cmd(leader, f"/raidinvite {m}")
+                    write_cmd(leader, f"/raidinvite {m}")
             
             # Brief pause for EQ to process the incoming invite requests
             time.sleep(2.0)
             
             # Have all members accept simultaneously
-            #for m in other_members:
-            #    write_cmd(m, "/invite accept")
-            #    # Also accept raid invites if applicable
-            #    write_cmd(m, "/raidaccept")
+            for m in other_members:
+                write_cmd(m, "/invite")
+                # Also accept raid invites if applicable
+                write_cmd(m, "/yes")
                 
             print("[AutoGroup] Group/Raid formation sequence complete.")
             return
@@ -4501,13 +4738,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         
         if parsed_path.path == "/":
+            body = HTML_CONTENT.encode()
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
             self.end_headers()
-            self.wfile.write(HTML_CONTENT.encode())
+            self.wfile.write(body)
             
         elif parsed_path.path == "/favicon.ico":
             ico_path = os.path.join(os.path.dirname(DEFAULT_EQ_PATH), "Everquest.ico")
@@ -4529,11 +4768,46 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
                 
+        elif parsed_path.path == "/api/guides":
+            guides_dir = os.path.join(BASE_DIR, "antigravity", "guides")
+            guides = []
+            if os.path.exists(guides_dir):
+                for f in os.listdir(guides_dir):
+                    if f.endswith(".md"):
+                        guides.append(f)
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"guides": sorted(guides)}).encode())
+            
+        elif parsed_path.path == "/api/guide_content":
+            query = parse_qs(parsed_path.query)
+            guide_name = query.get("name", [""])[0]
+            guides_dir = os.path.join(BASE_DIR, "antigravity", "guides")
+            safe_path = os.path.abspath(os.path.join(guides_dir, guide_name))
+            if safe_path.startswith(os.path.abspath(guides_dir)) and os.path.exists(safe_path):
+                with open(safe_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(content.encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b"Guide not found")
+
         elif parsed_path.path == "/status":
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(b"{}")
+            
+        elif parsed_path.path == "/crashes":
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"crashes": list(CRASHED_SESSIONS)}).encode())
             
         elif parsed_path.path == "/eqbc_chat":
             data = {"chat": list(EQBC_CLIENT.chat_history)}
@@ -4588,7 +4862,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             FROM profiles p 
                             JOIN characters c ON p.character_id = c.id 
                             WHERE p.group_id = ? 
-                            ORDER BY p.sort_order
+                            ORDER BY pg.name, p.sort_order
                         """, (g_id,))
                         for m_row in c.fetchall():
                             members.append({
@@ -4893,7 +5167,44 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             data = {}
 
-        if self.path == "/shutdown":
+        if self.path == "/dismiss_crashes":
+            CRASHED_SESSIONS.clear()
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            
+        elif self.path == "/relaunch_crashes":
+            crashes = list(CRASHED_SESSIONS)
+            CRASHED_SESSIONS.clear()
+            
+            if os.path.exists(DEFAULT_LOGIN_DB):
+                conn = sqlite3.connect(DEFAULT_LOGIN_DB)
+                c = conn.cursor()
+                for char_name in crashes:
+                    c.execute("""
+                        SELECT c.character, c.server, p.eq_path, p.additional_eqgame_args 
+                        FROM characters c 
+                        LEFT JOIN profiles p ON c.id = p.character_id
+                        WHERE LOWER(c.character) = ? LIMIT 1
+                    """, (char_name.lower(),))
+                    row = c.fetchone()
+                    if row:
+                        name, server, eq_path, args = row
+                        if not eq_path or not os.path.exists(eq_path):
+                            eq_path = DEFAULT_EQ_PATH
+                        cmd_str = get_native_launch_cmd(name, eq_path, args, server)
+                        ACTIVE_SESSIONS[name.lower()] = time.time()
+                        working_dir = os.path.dirname(eq_path)
+                        subprocess.Popen(cmd_str, cwd=working_dir, shell=True)
+                conn.close()
+                
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            
+        elif self.path == "/shutdown":
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
@@ -4908,8 +5219,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/restart":
             self.send_response(200)
             self.send_header("Content-type", "application/json")
+            self.send_header("Content-Length", "2")
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(b"{}")
+            
+            try:
+                self.wfile.flush()
+            except:
+                pass
+
             def _do_restart():
                 try:
                     time.sleep(0.3)
@@ -4948,19 +5267,202 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"{}")
             
-        elif self.path == "/cmd/summon_all":
-            online_chars = get_online_characters(max_age=15)
-            cmds = []
-            for c in online_chars:
-                if c.lower() != 'mobsterer':
-                    cmds.append(f"/#summon {c.capitalize()}")
-            if cmds:
-                self.write_cmd("Mobsterer", "\n".join(cmds))
+        elif self.path == "/cmd/ae_toggle":
+            state = data.get("state", True)
+            if state:
+                # Enable AE Mode
+                cmds = [
+                    "/bcaa //rglua aemode on",
+                    "/bct Bardia //rglua melody aemana",
+                    "/bct Bardib //rglua melody aemana",
+                    "/bct Bardic //rglua melody aemana"
+                ]
+            else:
+                # Disable AE Mode
+                cmds = [
+                    "/bcaa //rglua aemode off",
+                    "/bct Bardia //rglua melody stop",
+                    "/bct Bardib //rglua melody stop",
+                    "/bct Bardic //rglua melody stop"
+                ]
+            self.write_cmd("Mobsterer", "\n".join(cmds))
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        elif self.path == "/cmd/ae_start":
+            self.write_cmd("Mobsterer", "/bcaa //lua run aeheals\n/bcaa //lua run aestun\n/lua run aefarm")
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        elif self.path == "/cmd/ae_stop":
+            self.write_cmd("Mobsterer", "/bcaa //lua stop aeheals\n/bcaa //lua stop aestun\n/lua stop aefarm\n/bcaa //rglua pause")
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(b"{}")
             
+        elif self.path == "/cmd/summon_all":
+            self.write_cmd("Mobsterer", "/lua run summall")
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            
+        elif self.path == "/cmd/launch_ae_cohort":
+            # Spin up a thread so we don't block the UI while 18 clients launch
+            def _launch_ae():
+                try:
+                    conn = sqlite3.connect(DEFAULT_LOGIN_DB)
+                    c = conn.cursor()
+                    c.execute("""
+                        SELECT c.character, p.custom_client_ini, c.server, p.sort_order 
+                        FROM profiles p 
+                        JOIN characters c ON p.character_id = c.id 
+                        JOIN profile_groups pg ON p.group_id = pg.id
+                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3')
+                        ORDER BY pg.name, p.sort_order
+                    """)
+                    profiles = c.fetchall()
+                    conn.close()
+                    
+                    eq_path = DEFAULT_EQ_PATH
+                    working_dir = os.path.dirname(eq_path)
+                    
+                    if not profiles:
+                        print("No profiles found for AE Cohort groups!")
+                        return
+                        
+                    online_chars = get_online_characters(max_age=15)
+                        
+                    print(f"Launching AE Cohort ({len(profiles)} characters)...")
+                    for idx, p in enumerate(profiles):
+                        char_name = p[0]
+                        custom_client_ini = p[1]
+                        server = p[2]
+                        
+                        if char_name:
+                            if char_name.lower() in online_chars:
+                                print(f"[{char_name}] already online, skipping launch.")
+                                ACTIVE_SESSIONS[char_name.lower()] = time.time()
+                                continue
+                                
+                            ACTIVE_SESSIONS[char_name.lower()] = time.time()
+                            cmd_str = get_native_launch_cmd(char_name, eq_path, custom_client_ini, server)
+                            print(f"Launching {char_name}: {cmd_str}")
+                            
+                            working_dir = os.path.dirname(eq_path)
+                            subprocess.Popen(cmd_str, shell=True, cwd=working_dir)
+                            if idx < len(profiles) - 1:
+                                time.sleep(8)
+                                
+                    # Once all launch processes are spawned, start a monitor to form the raid
+                    def _auto_form_ae_raid(expected):
+                        print("[AutoRaid] Monitoring AE Cohort to come online...")
+                        start_time = time.time()
+                        while time.time() - start_time < 300:
+                            online_chars = set()
+                            files = glob.glob(os.path.join(COMMANDS_DIR, "*.status.json"))
+                            for f in files:
+                                try:
+                                    with open(f, 'r') as fh:
+                                        content = json.load(fh)
+                                        c_name = content.get("name")
+                                        if c_name and time.time() - content.get("timestamp", 0) < 6:
+                                            online_chars.add(c_name.lower())
+                                except: pass
+                            
+                            if all(m.lower() in online_chars for m in expected):
+                                print("[AutoRaid] All AE members online! Delaying 8s...")
+                                time.sleep(8)
+                                g1 = expected[0:6]
+                                g2 = expected[6:12]
+                                g3 = expected[12:18]
+                                
+                                # Generate and write the autonomous Lua script
+                                lua_script = generate_auto_raid_lua(g1, g2, g3)
+                                lua_path = r"c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\lua\auto_raid.lua"
+                                try:
+                                    with open(lua_path, "w") as f:
+                                        f.write(lua_script)
+                                except Exception as e:
+                                    print(f"Failed to write lua script: {e}")
+                                
+                                # Trigger only the master raid leader to execute the orchestration script
+                                write_cmd(g1[0].lower(), "/lua run auto_raid")
+                                
+                                # Wait for raid assembly to complete before setting MA
+                                def delayed_ma_set():
+                                    time.sleep(20)
+                                    write_cmd_global("all", f"/rglua mainassist {g1[0]}")
+                                    print("[AutoRaid] Raid formation complete.")
+                                    
+                                threading.Thread(target=delayed_ma_set, daemon=True).start()
+                                return
+                                return
+                            time.sleep(3)
+                    
+                    threading.Thread(target=_auto_form_ae_raid, args=([p[0].capitalize() for p in profiles],), daemon=True).start()
+                                
+                except Exception as e:
+                    print(f"Error launching AE cohort: {e}")
+            threading.Thread(target=_launch_ae, daemon=True).start()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+            
+        elif self.path == "/cmd/ae_form_raid":
+            def _form_raid():
+                try:
+                    conn = sqlite3.connect(DEFAULT_LOGIN_DB)
+                    c = conn.cursor()
+                    c.execute("""
+                        SELECT c.character 
+                        FROM profiles p 
+                        JOIN characters c ON p.character_id = c.id 
+                        JOIN profile_groups pg ON p.group_id = pg.id
+                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3')
+                        ORDER BY pg.name, p.sort_order
+                    """)
+                    cohort = [row[0].capitalize() for row in c.fetchall()]
+                    conn.close()
+                    if not cohort:
+                        return
+                        
+                    g1 = cohort[0:6]
+                    g2 = cohort[6:12]
+                    g3 = cohort[12:18]
+                    
+                    # Generate and write the autonomous Lua script
+                    lua_script = generate_auto_raid_lua(g1, g2, g3)
+                    lua_path = r"c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\lua\auto_raid.lua"
+                    try:
+                        with open(lua_path, "w") as f:
+                            f.write(lua_script)
+                    except Exception as e:
+                        print(f"Failed to write lua script: {e}")
+                    
+                    # Trigger only the master raid leader to execute the orchestration script
+                    write_cmd(g1[0].lower(), "/lua run auto_raid")
+                    
+                    # Wait for raid assembly to complete before setting MA
+                    def delayed_ma_set():
+                        time.sleep(20)
+                        write_cmd_global("all", f"/rglua mainassist {g1[0]}")
+                        print("[AutoRaid] Raid formation complete.")
+                        
+                    threading.Thread(target=delayed_ma_set, daemon=True).start()
+                    
+                except Exception as e:
+                    print(f"Error forming AE raid: {e}")
+            threading.Thread(target=_form_raid, daemon=True).start()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status": "ok"}')
+
         elif self.path == "/launch_group":
             group_id = data.get("group_id")
             launched = 0
@@ -4973,7 +5475,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         SELECT c.character, p.custom_client_ini, c.server 
                         FROM profiles p 
                         LEFT JOIN characters c ON p.character_id = c.id
-                        WHERE p.group_id = ? ORDER BY p.sort_order
+                        WHERE p.group_id = ? ORDER BY pg.name, p.sort_order
                     """, (group_id,))
                     profiles = c.fetchall()
                     conn.close()
@@ -5042,7 +5544,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     
                     if row:
                         name, server, eq_path, args = row
-                        if not eq_path:
+                        if not eq_path or not os.path.exists(eq_path):
                             eq_path = DEFAULT_EQ_PATH
                         cmd_str = get_native_launch_cmd(name, eq_path, args, server)
                         ACTIVE_SESSIONS[name.lower()] = time.time()
@@ -5375,7 +5877,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         FROM profiles p 
                         JOIN characters c ON p.character_id = c.id 
                         WHERE p.group_id = ? 
-                        ORDER BY p.sort_order
+                        ORDER BY pg.name, p.sort_order
                     """, (group_id,))
                     members = [row[0].capitalize() for row in c.fetchall()]
                     conn.close()
@@ -5407,8 +5909,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                         time.sleep(2.0)
                         
                         for m in other_members:
-                            write_cmd(m, "/invite accept")
-                            write_cmd(m, "/raidaccept")
+                            write_cmd(m, "/invite")
+                            write_cmd(m, "/yes")
                             
                     threading.Thread(target=invite_sequence).start()
                     
@@ -5862,140 +6364,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             ]
             
             GM_MACROS = [
-                {"name": "GM-Summ", "color": "0", "lines": ["/#summon ${Target.CleanName}"]},
-                {"name": "GM-Goto", "color": "0", "lines": ["/#goto ${Target.CleanName}"]},
+                {"name": "GM-Summ", "color": "0", "lines": ["/say #summon ${Target.CleanName}"]},
+                {"name": "GM-Goto", "color": "0", "lines": ["/say #goto ${Target.CleanName}"]},
                 {"name": "GM-SumCrp", "color": "0", "lines": ["/lua run summcrp"]},
-                {"name": "GM-Res", "color": "0", "lines": ["/lua run bcast /lua run autores", "/#castspell 994"]}
+                {"name": "GM-Res", "color": "0", "lines": ["/lua run bcast /lua run autores", "/say #castspell 994"]}
             ]
-            
-            # Dynamically build GM-SummAll macro
-            all_chars = []
-            if os.path.exists(DEFAULT_LOGIN_DB):
-                try:
-                    conn = sqlite3.connect(DEFAULT_LOGIN_DB)
-                    c = conn.cursor()
-                    c.execute("SELECT DISTINCT character FROM characters ORDER BY character")
-                    all_chars = [row[0] for row in c.fetchall() if row[0].lower() != 'mobsterer']
-                    conn.close()
-                except:
-                    pass
-            # Generate summall.lua script for in-game execution
-            try:
-                lua_script_path = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "summall.lua")
-                lua_lines = ["local mq = require('mq')", ""]
-                for c in all_chars:
-                    lua_lines.append(f'mq.cmd("/#summon {c}")')
-                    lua_lines.append("mq.delay(50)")
-                with open(lua_script_path, "w") as f:
-                    f.write("\n".join(lua_lines))
-                GM_MACROS.append({"name": "SummAll", "color": "0", "lines": ["/lua run summall"]})
-            except Exception as e:
-                print(f"Failed to write summall.lua: {e}")
-                
-            # Generate summcrp.lua script for in-game execution
-            try:
-                lua_script_path2 = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "summcrp.lua")
-                lua_lines2 = [
-                    "local mq = require('mq')",
-                    "local corpses = {}",
-                    "for i=1, 50 do",
-                    "    local c = mq.TLO.Spawn('pccorpse ' .. i)",
-                    "    if c() then",
-                    "        table.insert(corpses, c.ID())",
-                    "    else",
-                    "        break",
-                    "    end",
-                    "end",
-                    "for _, id in ipairs(corpses) do",
-                    "    mq.cmd('/squelch /tar id ' .. id)",
-                    "    mq.delay(200)",
-                    "    if mq.TLO.Target.ID() == id then",
-                    "        mq.cmd('/#summon')",
-                    "        mq.delay(300)",
-                    "    end",
-                    "end"
-                ]
-                with open(lua_script_path2, "w") as f:
-                    f.write("\n".join(lua_lines2))
-            except Exception as e:
-                print(f"Failed to write summcrp.lua: {e}")
-                
-            # Generate autores.lua script for in-game execution
-            try:
-                lua_script_path3 = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "autores.lua")
-                lua_lines3 = [
-                    "local mq = require('mq')",
-                    "printf('\\ayAuto-Res\\aw: Waiting up to 60s for resurrection dialog...')",
-                    "local timeout = os.time() + 60",
-                    "local accepted = false",
-                    "while os.time() < timeout do",
-                    "    if mq.TLO.Window('ConfirmationDialogBox').Open() then",
-                    "        printf('\\ayAuto-Res\\aw: Dialog detected. Accepting...')",
-                    "        mq.cmd('/squelch /notify ConfirmationDialogBox Yes_Button leftmouseup')",
-                    "        mq.cmd('/squelch /notify ConfirmationDialogBox CD_Yes_Button leftmouseup')",
-                    "        if mq.TLO.Window('ConfirmationDialogBox').Child('Yes_Button')() then",
-                    "            mq.TLO.Window('ConfirmationDialogBox').Child('Yes_Button').LeftMouseUp()",
-                    "        end",
-                    "        accepted = true",
-                    "        break",
-                    "    end",
-                    "    mq.delay(500)",
-                    "end",
-                    "if not accepted then",
-                    "    printf('\\ayAuto-Res\\aw: No dialog found. Exiting.')",
-                    "    return",
-                    "end",
-                    "printf('\\ayAuto-Res\\aw: Waiting for zoning to complete...')",
-                    "mq.delay(2000)",
-                    "while mq.TLO.EverQuest.GameState() ~= 'INGAME' do",
-                    "    mq.delay(500)",
-                    "end",
-                    "mq.delay(3000)",
-                    "printf('\\ayAuto-Res\\aw: Looking for corpse...')",
-                    "mq.cmd('/squelch /tar mycorpse')",
-                    "mq.delay(1000)",
-                    "if mq.TLO.Target.ID() > 0 and mq.TLO.Target.Type() == 'Corpse' then",
-                    "    printf('\\ayAuto-Res\\aw: Corpse found. Looting...')",
-                    "    mq.cmd('/corpse')",
-                    "    mq.delay(500)",
-                    "    mq.cmd('/loot')",
-                    "    mq.delay(2000)",
-                    "    if mq.TLO.Window('LootWnd').Open() then",
-                    "        mq.cmd('/notify LootWnd LW_LootAllButton leftmouseup')",
-                    "        mq.delay(1000)",
-                    "    else",
-                    "        printf('\\ayAuto-Res\\aw: Loot window did not open.')",
-                    "    end",
-                    "else",
-                    "    printf('\\ayAuto-Res\\aw: Could not find my corpse.')",
-                    "end",
-                    "printf('\\ayAuto-Res\\aw: Finished.')"
-                ]
-                with open(lua_script_path3, "w") as f:
-                    f.write("\n".join(lua_lines3))
-            except Exception as e:
-                print(f"Failed to write autores.lua: {e}")
 
-            # Generate bcast.lua script for in-game execution (simulates Dannet/EQBC via Orchestrator HTTP)
-            try:
-                lua_script_path4 = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "bcast.lua")
-                lua_lines4 = [
-                    "local mq = require('mq')",
-                    "local args = {...}",
-                    "local cmd = table.concat(args, ' ')",
-                    "if cmd == '' then",
-                    "    print('Usage: /lua run bcast <command>')",
-                    "    return",
-                    "end",
-                    "-- Escape quotes",
-                    "cmd = cmd:gsub('\"', '\\\\\"')",
-                    "local curl_cmd = string.format('start /B curl -s -X POST -H \"Content-Type: application/json\" -d \"{\\\\\\\"command\\\\\\\":\\\\\\\"%s\\\\\\\"}\" http://localhost:8099/cmd/all > nul', cmd)",
-                    "os.execute(curl_cmd)"
-                ]
-                with open(lua_script_path4, 'w') as f:
-                    f.write("\n".join(lua_lines4))
-            except Exception as e:
-                print(f"Failed to write bcast.lua: {e}")
             
             try:
                 pass
@@ -6490,7 +6864,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     
                     if name in online_chars:
                         if use_gm and gm_char:
-                            gm_cmd = f"#movechar {name} {zone_name} {target_x} {target_y} {target_z}"
+                            gm_cmd = f"/lua exec mq.cmd('/say #movechar {name} {zone_name} {target_x} {target_y} {target_z}')"
                             self.write_cmd(gm_char, gm_cmd)
                             moved_online.append(f"{name} (via GM {gm_char})")
                         else:
@@ -6531,7 +6905,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             conn.close()
             
     def write_cmd(self, char, cmd):
-        write_cmd_global(char, cmd)
+        write_cmd(char, cmd)
 
 if __name__ == "__main__":
     start_eqbcs()
