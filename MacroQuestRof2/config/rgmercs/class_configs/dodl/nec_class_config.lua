@@ -577,32 +577,51 @@ local _ClassConfig = {
             "Bestow Undeath",
         },
         ['RogPetSpell'] = {
-            "Unearthed Assassin",
-            "Reborn Assassin",
-            "Raised Assassin",
-            "Unliving Murderer",
-            "Noxious Servant",
-            "Putrescent Servant",
-            "Dark Assassin",
-            "Minion of Shadows",
+            "Dark Assassin XVI",    -- Level 130
+            "Merciless Assassin",   -- Level 125
+            "Unrelenting Assassin", -- Level 120
+            "Restless Assassin",    -- Level 115
+            "Reliving Assassin",    -- Level 110
+            "Revived Assassin",     -- Level 105
+            "Unearthed Assassin",   -- Level 100
+            "Reborn Assassin",      -- Level 95
+            "Raised Assassin",      -- Level 90
+            "Unliving Murderer",    -- Level 85
+            "Noxious Servant",      -- Level 80
+            "Putrescent Servant",   -- Level 75
+            "Dark Assassin",        -- Level 70
+            "Saryrn's Companion",   -- Level 63
+            "Minion of Shadows",    -- Level 53
         },
         ['WarPetSpell'] = {
-            "Lost Soul",
-            "Child of Bertoxxulous",
-            "Emissary of Thule",
-            "Servant of Bones",
-            "Invoke Death",
-            "Cackling Bones",
-            "Malignant Dead",
-            "Invoke Shadow",
-            "Summon Dead",
-            "Haunting Corpse",
-            "Animate Dead",
-            "Restless Bones",
-            "Convoke Shadow",
-            "Bone Walk",
-            "Leering Corpse",
-            "Cavorting Bones",
+            "Rasvimun's Shade",      -- Level 127
+            "Margator's Shade",      -- Level 122
+            "Luclin's Conqueror",    -- Level 117
+            "Tserrina's Shade",      -- Level 112
+            "Adalora's Shade",       -- Level 107
+            "Miktokla's Shade",      -- Level 102
+            "Zalifur's Shade",       -- Level 97
+            "Vak`Ridel's Shade",     -- Level 92
+            "Aziad's Shade",         -- Level 87
+            "Bloodreaper's Shade",   -- Level 82
+            "Relamar's Shade",       -- Level 77
+            "Riza`farr's Shadow",    -- Level 72
+            "Lost Soul",             -- Level 67
+            "Child of Bertoxxulous", -- Level 65
+            "Emissary of Thule",     -- Level 59
+            "Servant of Bones",      -- Level 56
+            "Invoke Death",          -- Level 48
+            "Cackling Bones",        -- Level 44
+            "Malignant Dead",        -- Level 39
+            "Invoke Shadow",         -- Level 33
+            "Summon Dead",           -- Level 29
+            "Haunting Corpse",       -- Level 24
+            "Animate Dead",          -- Level 20
+            "Restless Bones",        -- Level 16
+            "Convoke Shadow",        -- Level 12
+            "Bone Walk",             -- Level 8
+            "Leering Corpse",        -- Level 4
+            "Cavorting Bones",       -- Level 1
         },
         ['PetBuff'] = {
         },

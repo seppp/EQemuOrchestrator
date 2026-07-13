@@ -95,6 +95,41 @@ local _ClassConfig    = {
         },
     },
     ['AbilitySets']   = {
+        ['PetSpell'] = {
+            "Arkahn's Animation",    -- Level 126
+            "Flariton's Animation",  -- Level 121
+            "Constance's Animation", -- Level 116
+            "Omica's Animation",     -- Level 111
+            "Nureya's Animation",    -- Level 106
+            "Gordianus' Animation",  -- Level 101
+            "Xorlex's Animation",    -- Level 96
+            "Seronvall's Animation", -- Level 91
+            "Novak's Animation",     -- Level 86
+            "Yozan's Animation",     -- Level 81
+            "Erradien's Animation",  -- Level 76
+            "Ellowind's Animation",  -- Level 71
+            "Salik's Animation",     -- Level 66
+            "Aeldorb's Animation",   -- Level 62
+            "Zumaik's Animation",    -- Level 55
+            "Kintaz's Animation",    -- Level 48
+            "Yegoreff's Animation",  -- Level 41
+            "Aanya's Animation",     -- Level 37
+            "Boltran's Animation",   -- Level 31
+            "Uleen's Animation",     -- Level 29
+            "Sagar's Animation",     -- Level 22
+            "Sisna's Animation",     -- Level 17
+            "Shalee's Animation",    -- Level 14
+            "Kilan's Animation",     -- Level 9
+            "Mircyl's Animation",    -- Level 7
+            "Juli's Animation",      -- Level 2
+            "Pendril's Animation",   -- Level 1
+        },
+        ['PetBuffSpell'] = {
+            "Empowered Minion IV", -- Level 128
+            "Invigorated Minion",  -- Level 117
+            "Infused Minion",      -- Level 107
+            "Empowered Minion",    -- Level 97
+        },
         ['TwincastAura'] = {
             "Twincast Aura Rk. III",
             "Twincast Aura Rk. II",

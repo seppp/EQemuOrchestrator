@@ -689,6 +689,67 @@ return {
             if not (Config:GetSetting('DoRain') and Config:GetSetting('DoAEDamage')) then return false end
             return Targeting.GetTargetDistance() >= Config:GetSetting('RainDistance') and Targeting.MobNotLowHP(target)
         end,
+
+        GetResolvedElement = function()
+            local choice = Config:GetSetting('ElementChoice')
+            if choice == 1 then -- Auto
+                -- 1. Check active Mastery AA buffs
+                if mq.TLO.Me.Buff("Pyromancy")() or mq.TLO.Me.Buff("Pyromancy Rk. II")() or mq.TLO.Me.Buff("Pyromancy Rk. III")() then
+                    return 1 -- Fire
+                elseif mq.TLO.Me.Buff("Cryomancy")() or mq.TLO.Me.Buff("Cryomancy Rk. II")() or mq.TLO.Me.Buff("Cryomancy Rk. III")() then
+                    return 2 -- Ice
+                elseif mq.TLO.Me.Buff("Arcanomancy")() or mq.TLO.Me.Buff("Arcanomancy Rk. II")() or mq.TLO.Me.Buff("Arcanomancy Rk. III")() or mq.TLO.Me.Buff("Acromancy")() then
+                    return 3 -- Magic
+                end
+
+                -- 2. Check active Familiar buffs
+                if mq.TLO.Me.Buff("Ro's Familiar")() or mq.TLO.Me.Buff("Greater Ro's Familiar")() or mq.TLO.Me.Buff("Ro's Familiar Rk. II")() or mq.TLO.Me.Buff("Ro's Familiar Rk. III")() then
+                    return 1 -- Fire
+                elseif mq.TLO.Me.Buff("E'ci's Familiar")() or mq.TLO.Me.Buff("Greater E'ci's Familiar")() or mq.TLO.Me.Buff("E'ci's Familiar Rk. II")() or mq.TLO.Me.Buff("E'ci's Familiar Rk. III")() then
+                    return 2 -- Ice
+                elseif mq.TLO.Me.Buff("Druzzil's Familiar")() or mq.TLO.Me.Buff("Greater Druzzil's Familiar")() or mq.TLO.Me.Buff("Druzzil's Familiar Rk. II")() or mq.TLO.Me.Buff("Druzzil's Familiar Rk. III")() then
+                    return 3 -- Magic
+                end
+
+                -- 3. Check level-appropriate spells available in spell book.
+                local fireSpell = Core.GetResolvedActionMapItem('FireNuke')
+                local iceSpell = Core.GetResolvedActionMapItem('IceNuke')
+                local magicSpell = Core.GetResolvedActionMapItem('MagicNuke')
+
+                local fireLevel = fireSpell and fireSpell.Level() or 0
+                local iceLevel = iceSpell and iceSpell.Level() or 0
+                local magicLevel = magicSpell and magicSpell.Level() or 0
+
+                local bigFireSpell = Core.GetResolvedActionMapItem('BigFireNuke')
+                local bigIceSpell = Core.GetResolvedActionMapItem('BigIceNuke')
+                local bigMagicSpell = Core.GetResolvedActionMapItem('BigMagicNuke')
+
+                local bigFireLevel = bigFireSpell and bigFireSpell.Level() or 0
+                local bigIceLevel = bigIceSpell and bigIceSpell.Level() or 0
+                local bigMagicLevel = bigMagicSpell and bigMagicSpell.Level() or 0
+
+                local maxFire = math.max(fireLevel, bigFireLevel)
+                local maxIce = math.max(iceLevel, bigIceLevel)
+                local maxMagic = math.max(magicLevel, bigMagicLevel)
+
+                if maxFire == 0 and maxIce == 0 and maxMagic == 0 then
+                    -- Fallback if no spells resolved yet
+                    return 1 -- Fire
+                end
+
+                -- Pick the element with the highest level spell
+                if maxFire >= maxIce and maxFire >= maxMagic then
+                    return 1 -- Fire
+                elseif maxIce >= maxFire and maxIce >= maxMagic then
+                    return 2 -- Ice
+                else
+                    return 3 -- Magic
+                end
+            else
+                -- Map 2 -> 1 (Fire), 3 -> 2 (Ice), 4 -> 3 (Magic)
+                return choice - 1
+            end
+        end,
     },
     ['Charm']         = {
         ['Assist'] = {
@@ -773,8 +834,8 @@ return {
             name = 'FireDPS(1-70)',
             state = 1,
             steps = 1,
-            load_cond = function()
-                return Config:GetSetting('ElementChoice') == 1 and
+            load_cond = function(self)
+                return self.Helpers.GetResolvedElement() == 1 and
                     (mq.TLO.Me.Level() < 71 or (not Core.GetResolvedActionMapItem('ChaosNuke') and not Core.GetResolvedActionMapItem('WildNuke')))
             end,
             doFullRotation = true,
@@ -788,8 +849,8 @@ return {
             name = 'IceDPS(1-70)',
             state = 1,
             steps = 1,
-            load_cond = function()
-                return Config:GetSetting('ElementChoice') == 2 and
+            load_cond = function(self)
+                return self.Helpers.GetResolvedElement() == 2 and
                     (mq.TLO.Me.Level() < 71 or (not Core.GetResolvedActionMapItem('ChaosNuke') and not Core.GetResolvedActionMapItem('WildNuke')))
             end,
             doFullRotation = true,
@@ -803,8 +864,8 @@ return {
             name = 'MagicDPS(1-70)',
             state = 1,
             steps = 1,
-            load_cond = function()
-                return Config:GetSetting('ElementChoice') == 3 and
+            load_cond = function(self)
+                return self.Helpers.GetResolvedElement() == 3 and
                     (mq.TLO.Me.Level() < 71 or (not Core.GetResolvedActionMapItem('ChaosNuke') and not Core.GetResolvedActionMapItem('WildNuke')))
             end,
             doFullRotation = true,
@@ -1059,21 +1120,21 @@ return {
                 name = "FireClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 1 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 1 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
                 name = "IceClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 2 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 2 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
                 name = "MagicClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 3 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 3 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
@@ -1110,21 +1171,21 @@ return {
                 name = "FireClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 1 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 1 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
                 name = "IceClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 2 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 2 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
                 name = "MagicClaw",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 3 and not Casting.IHaveBuff("Improved Twincast")
+                    return self.Helpers.GetResolvedElement() == 3 and not Casting.IHaveBuff("Improved Twincast")
                 end,
             },
             {
@@ -1157,21 +1218,21 @@ return {
                 name = "ChaosNuke",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 1 and not Core.GetResolvedActionMapItem("WildNuke2")
+                    return self.Helpers.GetResolvedElement() == 1 and not Core.GetResolvedActionMapItem("WildNuke2")
                 end,
             },
             {
                 name = "IceNuke",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 2 and not Core.GetResolvedActionMapItem("WildNuke2")
+                    return self.Helpers.GetResolvedElement() == 2 and not Core.GetResolvedActionMapItem("WildNuke2")
                 end,
             },
             {
                 name = "MagicNuke",
                 type = "Spell",
                 cond = function(self)
-                    return Config:GetSetting('ElementChoice') == 3 and not Core.GetResolvedActionMapItem("WildNuke2")
+                    return self.Helpers.GetResolvedElement() == 3 and not Core.GetResolvedActionMapItem("WildNuke2")
                 end,
             },
         },
@@ -1344,9 +1405,9 @@ return {
                 { name = "VortexNuke", cond = function() return mq.TLO.Me.Level() > 102 end, },
                 { name = "SnapNuke",   cond = function() return Core.GetResolvedActionMapItem('ChaosNuke') or Core.GetResolvedActionMapItem('WildNuke') end, },
                 --1-70
-                { name = "FireNuke",   cond = function() return Config:GetSetting('ElementChoice') == 1 end, },
-                { name = "IceNuke",    cond = function() return Config:GetSetting('ElementChoice') == 2 end, },
-                { name = "MagicNuke",  cond = function() return Config:GetSetting('ElementChoice') == 3 end, },
+                { name = "FireNuke",   cond = function(self) return self.Helpers.GetResolvedElement() == 1 end, },
+                { name = "IceNuke",    cond = function(self) return self.Helpers.GetResolvedElement() == 2 end, },
+                { name = "MagicNuke",  cond = function(self) return self.Helpers.GetResolvedElement() == 3 end, },
 
             },
         },
@@ -1355,9 +1416,9 @@ return {
             spells = {
                 { name = "FireEtherealNuke", cond = function() return Core.GetResolvedActionMapItem('ChaosNuke') or Core.GetResolvedActionMapItem('WildNuke') end, },
                 --1-70
-                { name = "BigFireNuke",      cond = function() return Config:GetSetting('ElementChoice') == 1 end, },
-                { name = "BigIceNuke",       cond = function() return Config:GetSetting('ElementChoice') == 2 end, },
-                { name = "BigMagicNuke",     cond = function() return Config:GetSetting('ElementChoice') == 3 end, },
+                { name = "BigFireNuke",      cond = function(self) return self.Helpers.GetResolvedElement() == 1 end, },
+                { name = "BigIceNuke",       cond = function(self) return self.Helpers.GetResolvedElement() == 2 end, },
+                { name = "BigMagicNuke",     cond = function(self) return self.Helpers.GetResolvedElement() == 3 end, },
             },
         },
         {
@@ -1375,8 +1436,8 @@ return {
                 { name = "FuseNuke", },
                 -- 1
                 { name = "FireJyll",  cond = function() return Core.IsModeActive('PBAE(LowLevel)') and mq.TLO.Me.Level() < 71 end, },
-                { name = "FireRain",  cond = function() return Config:GetSetting('DoRain') and Config:GetSetting('ElementChoice') == 1 end, },
-                { name = "IceRain",   cond = function() return Config:GetSetting('DoRain') and Config:GetSetting('ElementChoice') == 2 end, },
+                { name = "FireRain",  cond = function(self) return Config:GetSetting('DoRain') and self.Helpers.GetResolvedElement() == 1 end, },
+                { name = "IceRain",   cond = function(self) return Config:GetSetting('DoRain') and self.Helpers.GetResolvedElement() == 2 end, },
                 { name = "EvacSpell", },
 
             },
@@ -1483,12 +1544,12 @@ return {
             Header = "Damage",
             Category = "Direct",
             Index = 101,
-            Tooltip = "Choose an element to focus on under level 71.",
+            Tooltip = "Choose an element to focus on under level 71 (Auto will dynamically detect element).",
             Type = "Combo",
-            ComboOptions = { 'Fire', 'Ice', 'Magic', },
-            Default = 2,
+            ComboOptions = { 'Auto', 'Fire', 'Ice', 'Magic', },
+            Default = 1,
             Min = 1,
-            Max = 3,
+            Max = 4,
             RequiresLoadoutChange = true,
         },
         ['DoRain']               = {

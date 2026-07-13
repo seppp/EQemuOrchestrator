@@ -565,115 +565,119 @@ _ClassConfig      = {
             "Iceflame Guard",
         },
         ['EarthPetSpell'] = {
-            "Shard's Landing Gate",
-            "Shard's Landing Portal",
-            "Shard of Air",
-            "Shard of Water",
-            "Shard of Fire",
-            "Shard of Earth",
-            "Facet of Earth",
-            "Construct of Earth",
-            "Aspect of Earth",
-            "Core of Earth",
-            "Essence of Earth",
-            "Child of Earth",
-            "Greater Vocaration: Earth",
-            "Vocarate: Earth",
-            "Greater Conjuration: Earth",
-            "Conjuration: Earth",
-            "Lesser Conjuration: Earth",
-            "Minor Conjuration: Earth",
-            "Greater Summoning: Earth",
-            "Summoning: Earth",
-            "Lesser Summoning: Earth",
-            "Minor Summoning: Earth",
-            "Elemental: Earth",
-            "Elementaling: Earth",
-            "Elementalkin: Earth",
+            "Earth Elemental XXVI",       -- Level 129
+            "Recruitment of Earth",       -- Level 124
+            "Conscription of Earth",      -- Level 119
+            "Manifestation of Earth",     -- Level 114
+            "Embodiment of Earth",        -- Level 109
+            "Convocation of Earth",       -- Level 104
+            "Shard of Earth",             -- Level 99
+            "Facet of Earth",             -- Level 94
+            "Construct of Earth",         -- Level 89
+            "Aspect of Earth",            -- Level 84
+            "Core of Earth",              -- Level 79
+            "Essence of Earth",           -- Level 74
+            "Child of Earth",             -- Level 70
+            "Greater Vocaration: Earth",  -- Level 57
+            "Vocarate: Earth",            -- Level 51
+            "Greater Conjuration: Earth", -- Level 46
+            "Conjuration: Earth",         -- Level 44
+            "Lesser Conjuration: Earth",  -- Level 39
+            "Minor Conjuration: Earth",   -- Level 34
+            "Greater Summoning: Earth",   -- Level 29
+            "Summoning: Earth",           -- Level 25
+            "Lesser Summoning: Earth",    -- Level 21
+            "Minor Summoning: Earth",     -- Level 17
+            "Elemental: Earth",           -- Level 13
+            "Elementaling: Earth",        -- Level 9
+            "Elementalkin: Earth",        -- Level 5
         },
         ['WaterPetSpell'] = {
-            "Shard's Landing Gate",
-            "Shard's Landing Portal",
-            "Shard of Air",
-            "Shard of Fire",
-            "Shard of Earth",
-            "Shard of Water",
-            "Facet of Water",
-            "Construct of Water",
-            "Aspect of Water",
-            "Core of Water",
-            "Essence of Water",
-            "Child of Water",
-            "Servant of Marr",
-            "Greater Vocaration: Water",
-            "Vocarate: Water",
-            "Greater Conjuration: Water",
-            "Conjuration: Water",
-            "Lesser Conjuration: Water",
-            "Minor Conjuration: Water",
-            "Greater Summoning: Water",
-            "Summoning: Water",
-            "Lesser Summoning: Water",
-            "Minor Summoning: Water",
-            "Elemental: Water",
-            "Elementaling: Water",
-            "Elementalkin: Water",
+            "Water Elemental XXVI",       -- Level 127
+            "Recruitment of Water",       -- Level 122
+            "Conscription of Water",      -- Level 117
+            "Manifestation of Water",     -- Level 112
+            "Embodiment of Water",        -- Level 107
+            "Convocation of Water",       -- Level 102
+            "Shard of Water",             -- Level 97
+            "Facet of Water",             -- Level 92
+            "Construct of Water",         -- Level 87
+            "Aspect of Water",            -- Level 82
+            "Core of Water",              -- Level 77
+            "Essence of Water",           -- Level 72
+            "Child of Water",             -- Level 67
+            "Servant of Marr",            -- Level 62
+            "Greater Vocaration: Water",  -- Level 60
+            "Vocarate: Water",            -- Level 54
+            "Greater Conjuration: Water", -- Level 49
+            "Conjuration: Water",         -- Level 41
+            "Lesser Conjuration: Water",  -- Level 36
+            "Minor Conjuration: Water",   -- Level 31
+            "Greater Summoning: Water",   -- Level 26
+            "Summoning: Water",           -- Level 22
+            "Lesser Summoning: Water",    -- Level 18
+            "Minor Summoning: Water",     -- Level 14
+            "Elemental: Water",           -- Level 10
+            "Elementaling: Water",        -- Level 6
+            "Elementalkin: Water",        -- Level 2
         },
         ['AirPetSpell'] = {
-            "Shard's Landing Gate",
-            "Shard's Landing Portal",
-            "Shard of Water",
-            "Shard of Fire",
-            "Shard of Earth",
-            "Shard of Air",
-            "Facet of Air",
-            "Construct of Air",
-            "Aspect of Air",
-            "Core of Air",
-            "Essence of Air",
-            "Child of Wind",
-            "Ward of Xegony",
-            "Greater Vocaration: Air",
-            "Vocarate: Air",
-            "Greater Conjuration: Air",
-            "Conjuration: Air",
-            "Lesser Conjuration: Air",
-            "Minor Conjuration: Air",
-            "Greater Summoning: Air",
-            "Summoning: Air",
-            "Lesser Summoning: Air",
-            "Minor Summoning: Air",
-            "Elemental: Air",
-            "Elementaling: Air",
-            "Elementalkin: Air",
+            "Air Elemental XXVI",       -- Level 126
+            "Recruitment of Air",       -- Level 121
+            "Conscription of Air",      -- Level 116
+            "Manifestation of Air",     -- Level 111
+            "Embodiment of Air",        -- Level 106
+            "Convocation of Air",       -- Level 101
+            "Shard of Air",             -- Level 96
+            "Facet of Air",             -- Level 91
+            "Construct of Air",         -- Level 86
+            "Aspect of Air",            -- Level 81
+            "Core of Air",              -- Level 76
+            "Essence of Air",           -- Level 71
+            "Child of Wind",            -- Level 66
+            "Ward of Xegony",           -- Level 61
+            "Greater Vocaration: Air",  -- Level 59
+            "Vocarate: Air",            -- Level 53
+            "Greater Conjuration: Air", -- Level 48
+            "Conjuration: Air",         -- Level 43
+            "Lesser Conjuration: Air",  -- Level 38
+            "Minor Conjuration: Air",   -- Level 33
+            "Greater Summoning: Air",   -- Level 28
+            "Summoning: Air",           -- Level 24
+            "Lesser Summoning: Air",    -- Level 20
+            "Minor Summoning: Air",     -- Level 16
+            "Elemental: Air",           -- Level 12
+            "Elementaling: Air",        -- Level 8
+            "Elementalkin: Air",        -- Level 4
         },
         ['FirePetSpell'] = {
-            "Shard's Landing Gate",
-            "Shard's Landing Portal",
-            "Shard of Air",
-            "Shard of Water",
-            "Shard of Earth",
-            "Shard of Fire",
-            "Facet of Fire",
-            "Construct of Fire",
-            "Aspect of Fire",
-            "Core of Fire",
-            "Essence of Fire",
-            "Child of Fire",
-            "Child of Ro",
-            "Greater Vocaration: Fire",
-            "Vocarate: Fire",
-            "Greater Conjuration: Fire",
-            "Conjuration: Fire",
-            "Lesser Conjuration: Fire",
-            "Minor Conjuration: Fire",
-            "Greater Summoning: Fire",
-            "Summoning: Fire",
-            "Lesser Summoning: Fire",
-            "Minor Summoning: Fire",
-            "Elemental: Fire",
-            "Elementaling: Fire",
-            "Elementalkin: Fire",
+            "Fire Elemental XXVI",       -- Level 128
+            "Recruitment of Fire",       -- Level 123
+            "Conscription of Fire",      -- Level 118
+            "Manifestation of Fire",     -- Level 113
+            "Embodiment of Fire",        -- Level 108
+            "Convocation of Fire",       -- Level 103
+            "Shard of Fire",             -- Level 98
+            "Facet of Fire",             -- Level 93
+            "Construct of Fire",         -- Level 88
+            "Aspect of Fire",            -- Level 83
+            "Core of Fire",              -- Level 78
+            "Essence of Fire",           -- Level 73
+            "Child of Fire",             -- Level 68
+            "Child of Ro",               -- Level 63
+            "Greater Vocaration: Fire",  -- Level 58
+            "Vocarate: Fire",            -- Level 52
+            "Greater Conjuration: Fire", -- Level 47
+            "Conjuration: Fire",         -- Level 42
+            "Lesser Conjuration: Fire",  -- Level 37
+            "Minor Conjuration: Fire",   -- Level 32
+            "Greater Summoning: Fire",   -- Level 27
+            "Summoning: Fire",           -- Level 23
+            "Lesser Summoning: Fire",    -- Level 19
+            "Minor Summoning: Fire",     -- Level 15
+            "Elemental: Fire",           -- Level 11
+            "Elementaling: Fire",        -- Level 7
+            "Elementalkin: Fire",        -- Level 3
         },
         ['AegisBuff'] = {
             "Aegis of Nefori Rk. III",

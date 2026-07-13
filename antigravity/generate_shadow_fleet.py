@@ -3,9 +3,10 @@ import shutil
 import sqlite3
 import time
 
-SRC_DIR = r"c:\Users\sigha\OneDrive\Documents\eqemus\everquest_rof2\everquest_rof2"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(BASE_DIR, "everquest_rof2", "everquest_rof2")
 BASE_DEST_DIR = r"C:\EQ_AE_Fleet"
-DB_PATH = r"c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\config\login.db"
+DB_PATH = os.path.join(BASE_DIR, "MacroQuestRof2", "config", "login.db")
 
 def create_shadow_copy(src, dst):
     os.makedirs(dst, exist_ok=True)
@@ -13,6 +14,8 @@ def create_shadow_copy(src, dst):
         # Skip if we somehow hit a recursive path
         rel_path = os.path.relpath(root, src)
         dest_dir = dst if rel_path == '.' else os.path.join(dst, rel_path)
+        parts = rel_path.lower().split(os.sep)
+        is_logs_dir = 'logs' in parts
         os.makedirs(dest_dir, exist_ok=True)
         
         for f in files:
@@ -23,6 +26,21 @@ def create_shadow_copy(src, dst):
             src_file = os.path.join(root, f)
             dest_file = os.path.join(dest_dir, f)
             
+            # Skip hardlinking of logs and error tracking files
+            if is_logs_dir or f.lower() in ('uierrors.txt', 'errors.txt'):
+                continue
+                
+            # If the destination file exists, check if it needs to be updated (different size or different inode)
+            # Skip eqclient.ini from auto-updating since it has character-specific settings
+            if f.lower() != 'eqclient.ini' and os.path.exists(dest_file):
+                try:
+                    src_stat = os.stat(src_file)
+                    dest_stat = os.stat(dest_file)
+                    if src_stat.st_ino != dest_stat.st_ino or src_stat.st_size != dest_stat.st_size:
+                        os.remove(dest_file)
+                except Exception:
+                    pass
+                    
             if not os.path.exists(dest_file):
                 if f.lower() == 'eqclient.ini':
                     shutil.copy2(src_file, dest_file)
@@ -36,7 +54,7 @@ def main():
     print("Connecting to DB...")
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT id FROM profile_groups WHERE name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3')")
+    c.execute("SELECT id FROM profile_groups WHERE name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3', 'AE_Cohort_G4')")
     group_ids = [row[0] for row in c.fetchall()]
     
     chars = []

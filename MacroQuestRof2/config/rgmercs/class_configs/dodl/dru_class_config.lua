@@ -3,6 +3,8 @@ local Casting      = require("utils.casting")
 local Config       = require('utils.config')
 local Core         = require("utils.core")
 local Targeting    = require("utils.targeting")
+local Comms        = require("utils.comms")
+
 
 local _ClassConfig = {
     _version              = "DODL CUSTOM",
@@ -1160,6 +1162,7 @@ local _ClassConfig = {
                 active_cond = function(self, spell) return Casting.IHaveBuff(spell) end,
                 cond = function(self, spell, target)
                     if not Config:GetSetting('DoHPBuff') then return false end
+                    if Casting.TargetHasBuffList(target, Casting.ClericAegoBuffs) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },
@@ -1177,6 +1180,7 @@ local _ClassConfig = {
                 active_cond = function(self, spell) return Casting.IHaveBuff(spell) end,
                 cond = function(self, spell, target)
                     if not Config:GetSetting('DoGroupRegen') then return false end
+                    if Casting.TargetHasBuffList(target, Casting.ShamanRegenBuffs) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },

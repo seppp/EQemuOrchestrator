@@ -574,9 +574,6 @@ local _ClassConfig = {
         ['AllianceNuke'] = {
         },
         ['InfluenceDisc'] = {
-            "Insolent Agitation III",
-            "Insolent Agitation II",
-            "Insolent Agitation",
             "Insolent Reward III",
             "Insolent Reward II",
             "Insolent Reward",
@@ -585,7 +582,6 @@ local _ClassConfig = {
             "Insolent Influence",
         },
         ['HateBuff'] = {             --9 minute reuse makes these somewhat ridiculous to gem on the fly.
-            "Voice Graft",
             "Voice of the Berserker",
             "Voice of Quellious",
             "Voice of the Vampire",

@@ -606,7 +606,9 @@ local _ClassConfig = {
             "Revive",
             "Reparation",
             "Reconstitution",
+            "Reconstitute",
             "Reanimation",
+            "Reanimate",
         },
     },
     ['AASets']            = {

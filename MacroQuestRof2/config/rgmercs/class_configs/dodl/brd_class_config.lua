@@ -116,6 +116,9 @@ local _ClassConfig = {
     },
     ['AbilitySets']   = {
         ['RunBuffSong'] = {
+            "Selo's Song of Travel",
+            "Selo's Accelerating Chorus",
+            "Selo's Accelerando",
         },
         ['EndBreathSong'] = {
         },
@@ -199,20 +202,27 @@ local _ClassConfig = {
             "Aura of Renewal",
             "Aura of Rodcet",
         },
-        ['GroupRegenSong'] = {
-            "Pulse of Salarra Rk. III",
-            "Pulse of Salarra Rk. II",
-            "Pulse of Salarra",
-            "Pulse of Lunanyn",
-            "Pulse of Renewal",
-            "Cantata of Rodcet",
-            "Cantata of Restoration",
-            "Cantata of Life",
-            "Wind of Marr",
-            "Cantata of Replenishment",
-            "Cantata of Soothing",
-            "Hymn of Restoration",
-        },
+        ['GroupRegenSong'] = (function()
+            local songs = {
+                "Pulse of Salarra Rk. III",
+                "Pulse of Salarra Rk. II",
+                "Pulse of Salarra",
+                "Pulse of Lunanyn",
+                "Pulse of Renewal",
+                "Cantata of Rodcet",
+                "Cantata of Restoration",
+                "Cantata of Life",
+                "Wind of Marr",
+                "Cantata of Replenishment",
+            }
+            if mq.TLO.Me.Level() < 34 or mq.TLO.Me.Level() >= 55 then
+                table.insert(songs, "Cantata of Soothing")
+            end
+            table.insert(songs, "Cassindra's Chorus of Clarity")
+            table.insert(songs, "Cassindra's Chant of Clarity")
+            table.insert(songs, "Hymn of Restoration")
+            return songs
+        end)(),
         ['AreaRegenSong'] = {
             "Chorus of Salarra Rk. III",
             "Chorus of Salarra Rk. II",
@@ -665,7 +675,7 @@ local _ClassConfig = {
                 { name = "AESlowSong",    cond = function(self) return Config:GetSetting('DoAESlow') end, },
                 { name = "DispelSong",    cond = function(self) return Config:GetSetting('DoDispel') end, },
                 { name = "CureSong",      cond = function(self) return Config:GetSetting('UseCure') end, },
-                { name = "RunBuffSong",   cond = function(self) return Config:GetSetting('UseRunBuff') > 1 and not Casting.CanUseAA("Selo's Sonata") end, },
+                { name = "RunBuffSong",   cond = function(self) return (Config:GetSetting('UseRunBuff') > 1 or Config:GetSetting('ChaseOn')) and not Casting.CanUseAA("Selo's Sonata") end, },
                 { name = "EndBreathSong", cond = function(self) return Config:GetSetting('UseEndBreath') end, },
 
                 -- main group dps
@@ -1034,14 +1044,7 @@ local _ClassConfig = {
                     if success then self.TempSettings.LastMarchCast = Globals.GetTimeSeconds() end
                 end,
             },
-            {
-                name = "RunBuffSong",
-                type = "Song",
-                load_cond = function(self) return Core.GetResolvedActionMapItem('RunBuffSong') and Config:GetSetting('UseRunBuff') > 1 and not Casting.CanUseAA("Selo's Sonata") end,
-                cond = function(self, songSpell)
-                    return self.Helpers.CheckSongStateUse(self, "UseRunBuff") and self.Helpers.RefreshBuffSong(self, songSpell)
-                end,
-            },
+
             {
                 name = "Jonthan",
                 type = "Song",
@@ -1262,6 +1265,18 @@ local _ClassConfig = {
                 cond = function(self, songSpell, target)
                     if target.ID() == mq.TLO.Me.ID() then return false end
                     return (mq.TLO.Me.PctMana() > Config:GetSetting('SelfManaPct') or Casting.BurnCheck()) and Casting.DetSpellCheck(songSpell)
+                end,
+            },
+            {
+                name = "RunBuffSong",
+                type = "Song",
+                load_cond = function(self) return Core.GetResolvedActionMapItem('RunBuffSong') and (Config:GetSetting('UseRunBuff') > 1 or Config:GetSetting('ChaseOn')) and not Casting.CanUseAA("Selo's Sonata") end,
+                cond = function(self, songSpell)
+                    local shouldCheckState = not Config:GetSetting('ChaseOn')
+                    if shouldCheckState and not self.Helpers.CheckSongStateUse(self, "UseRunBuff") then
+                        return false
+                    end
+                    return self.Helpers.RefreshBuffSong(self, songSpell)
                 end,
             },
             {

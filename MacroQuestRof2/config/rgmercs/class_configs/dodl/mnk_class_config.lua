@@ -318,7 +318,8 @@ local _ClassConfig = {
                 load_cond = function(self) return Config:GetSetting('AggroFeign') end,
                 cond = function(self, aaName, target)
                     if Core.IsTanking() then return false end
-                    return (mq.TLO.Me.PctHPs() <= 40 and Targeting.IHaveAggro(100)) or (Globals.AutoTargetIsNamed and mq.TLO.Me.PctAggro() > 99)
+                    local hasAggro = Targeting.IHaveAggro(80) or (Globals.AutoTargetIsNamed and mq.TLO.Me.PctAggro() > 99)
+                    return hasAggro and (mq.TLO.Me.PctHPs() <= 30 or not mq.TLO.Me.AbilityReady("Feign Death")())
                 end,
             },
             {

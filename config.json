@@ -3,5 +3,6 @@
     "port": 3306,
     "user": "eqemu",
     "password": "I8dGa8W7wdEVApPgR6L5lYUe8ig7FHD",
-    "database": "peq"
+    "database": "peq",
+    "auto_restart_crashed": true
 }

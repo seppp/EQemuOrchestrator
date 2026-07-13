@@ -1,7 +1,9 @@
 import sqlite3
 import json
 
-conn = sqlite3.connect(r'c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\config\login.db')
+import os
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+conn = sqlite3.connect(os.path.join(BASE_DIR, 'MacroQuestRof2', 'config', 'login.db'))
 c = conn.cursor()
 
 c.execute("SELECT id, name FROM profile_groups WHERE name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3') ORDER BY name")

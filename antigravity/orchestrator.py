@@ -25,6 +25,8 @@ COMMANDS_DIR = os.path.join(BASE_DIR, "commands")
 
 ACTIVE_SESSIONS = {}
 CRASHED_SESSIONS = set()
+AUTO_RESTART_CRASHED = False
+LAUNCH_GRACE_PERIOD = 180
 CPU_CORE_INDEX = 2
 MAX_CORES = 32
 
@@ -55,11 +57,11 @@ def ensure_mq_running(silent=False):
     except Exception as e:
         print(f"Error checking/starting MacroQuest: {e}")
 
-def generate_auto_raid_lua(g1, g2, g3):
+def generate_auto_raid_lua(g1, g2, g3, g4):
     def lua_array(lst):
         return "{" + ", ".join(f'"{x}"' for x in lst) + "}"
     
-    groups_str = f'    ["{g1[0]}"] = {lua_array(g1[1:])},\n    ["{g2[0]}"] = {lua_array(g2[1:])},\n    ["{g3[0]}"] = {lua_array(g3[1:])}'
+    groups_str = f'    ["{g1[0]}"] = {lua_array(g1[1:])},\n    ["{g2[0]}"] = {lua_array(g2[1:])},\n    ["{g3[0]}"] = {lua_array(g3[1:])},\n    ["{g4[0]}"] = {lua_array(g4[1:])}'
     
     return f"""local mq = require('mq')
 local me = mq.TLO.Me.CleanName()
@@ -68,6 +70,7 @@ local raid_leader = "{g1[0]}"
 local g1_leader = "{g1[0]}"
 local g2_leader = "{g2[0]}"
 local g3_leader = "{g3[0]}"
+local g4_leader = "{g4[0]}"
 
 local groups = {{
 {groups_str}
@@ -112,7 +115,7 @@ mq.delay(1000)
 
 log_msg("Step 3: Forming Raid...")
 local function raid_full()
-    return (mq.TLO.Raid.Members() or 0) >= 18
+    return (mq.TLO.Raid.Members() or 0) >= 24
 end
 
 local attempts = 0
@@ -120,11 +123,13 @@ while not raid_full() and attempts < 10 do
     log_msg("Inviting group leaders to raid (Attempt " .. (attempts+1) .. ")...")
     mq.cmdf("/raidinvite %s", g2_leader)
     mq.cmdf("/raidinvite %s", g3_leader)
+    mq.cmdf("/raidinvite %s", g4_leader)
     mq.delay(1000)
     
     log_msg("Commanding group leaders to accept raid invite...")
     mq.cmdf("/bct %s //raidaccept", g2_leader)
     mq.cmdf("/bct %s //raidaccept", g3_leader)
+    mq.cmdf("/bct %s //raidaccept", g4_leader)
     mq.cmd("/bcaa //yes")
     mq.delay(2000)
     
@@ -137,6 +142,7 @@ else
     log_msg("Warning! Raid formation may have failed. Only " .. (mq.TLO.Raid.Members() or 0) .. " members in raid.")
 end
 """
+
 
 def get_online_characters(max_age=15):
     """Returns a lowercase set of character names that have recently reported status."""
@@ -155,6 +161,59 @@ def get_online_characters(max_age=15):
             pass
     return online_chars
 
+
+def is_character_client_running(char_name, char_eq_path):
+    import subprocess
+    import os
+    
+    char_name_lower = char_name.lower()
+    
+    # 1. Try wmic first (CommandLine contains the /login:... parameter)
+    try:
+        cmd_wmic = "wmic process where name='eqgame.exe' get CommandLine"
+        output = subprocess.check_output(cmd_wmic, shell=True).decode('utf-8', errors='ignore')
+        for line in output.splitlines():
+            line = line.strip()
+            if line and not line.lower().startswith("commandline"):
+                if f":{char_name_lower}" in line.lower():
+                    return True
+    except Exception:
+        pass
+        
+    # 2. Try PowerShell fallback
+    try:
+        cmd_ps = "powershell -Command \"(Get-CimInstance Win32_Process -Filter 'name=\'\'eqgame.exe\'\'').CommandLine\""
+        output = subprocess.check_output(cmd_ps, shell=True).decode('utf-8', errors='ignore')
+        for line in output.splitlines():
+            line = line.strip()
+            if line:
+                if f":{char_name_lower}" in line.lower():
+                    return True
+    except Exception as e:
+        print(f"Error checking running client with PowerShell fallback: {e}")
+        
+    # 3. Fallback: Path-based check on unique path
+    try:
+        cmd_wmic_path = "wmic process where name='eqgame.exe' get ExecutablePath"
+        output = subprocess.check_output(cmd_wmic_path, shell=True).decode('utf-8', errors='ignore')
+        target_path = os.path.normpath(char_eq_path).lower()
+        path_match_count = 0
+        for line in output.splitlines():
+            line = line.strip()
+            if line and line.lower().endswith('eqgame.exe'):
+                if os.path.normpath(line).lower() == target_path:
+                    path_match_count += 1
+        
+        if path_match_count > 0:
+            # Avoid matching shared folders
+            if "everquest_rof2\\everquest_rof2" not in target_path:
+                return True
+    except Exception:
+        pass
+        
+    return False
+
+
 def watchdog_thread():
     """Background thread that relaunches missing characters in ACTIVE_SESSIONS."""
     print("Watchdog thread started.")
@@ -171,14 +230,54 @@ def watchdog_thread():
         now = time.time()
         
         for char_name, launch_time in list(ACTIVE_SESSIONS.items()):
-            # Only check characters launched more than 60 seconds ago
-            if now - launch_time < 60:
+            # Only check characters launched more than LAUNCH_GRACE_PERIOD seconds ago
+            if now - launch_time < LAUNCH_GRACE_PERIOD:
                 continue
                 
             if char_name.lower() not in online_chars:
-                print(f"[Watchdog] {char_name} is offline (logged out or crashed). Removing from active sessions.")
-                CRASHED_SESSIONS.add(char_name.lower())
-                del ACTIVE_SESSIONS[char_name.lower()]
+                if AUTO_RESTART_CRASHED:
+                    print(f"[Watchdog] {char_name} is offline (logged out or crashed). Relaunching automatically (AUTO_RESTART_CRASHED is ON).")
+                    # Update active sessions launch time so we don't spam relaunch before client finishes loading
+                    ACTIVE_SESSIONS[char_name.lower()] = now
+                    try:
+                        EQBC_CLIENT.chat_history.append(f"[System] [Auto-Restart] {char_name.capitalize()} crashed/went offline. Relaunching automatically...")
+                    except Exception as eqbc_err:
+                        print(f"Error appending to chat history: {eqbc_err}")
+                        
+                    try:
+                        conn = sqlite3.connect(DEFAULT_LOGIN_DB)
+                        c = conn.cursor()
+                        c.execute("""
+                            SELECT c.character, c.server, p.eq_path, p.additional_eqgame_args 
+                            FROM characters c 
+                            LEFT JOIN profiles p ON c.id = p.character_id
+                            WHERE LOWER(c.character) = ? LIMIT 1
+                        """, (char_name.lower(),))
+                        row = c.fetchone()
+                        conn.close()
+                        if row:
+                            name, server, eq_path, args = row
+                            if not eq_path or not os.path.exists(eq_path):
+                                eq_path = DEFAULT_EQ_PATH
+                            
+                            # Check if the process is already running for this character
+                            if is_character_client_running(name, eq_path):
+                                print(f"[Watchdog] {name} is offline in-game but its eqgame.exe process is still running. Skipping relaunch.")
+                                continue
+                                
+                            cmd_str = get_native_launch_cmd(name, eq_path, args, server)
+                            working_dir = os.path.dirname(eq_path)
+                            print(f"[Watchdog] Relaunching {name}: {cmd_str}")
+                            subprocess.Popen(cmd_str, cwd=working_dir, shell=True)
+                        else:
+                            # Not found in db, remove from active sessions
+                            del ACTIVE_SESSIONS[char_name.lower()]
+                    except Exception as e:
+                        print(f"[Watchdog] Error during auto-relaunch of {char_name}: {e}")
+                else:
+                    print(f"[Watchdog] {char_name} is offline (logged out or crashed). Removing from active sessions.")
+                    CRASHED_SESSIONS.add(char_name.lower())
+                    del ACTIVE_SESSIONS[char_name.lower()]
 
 
 MAX_CORES = 16
@@ -285,6 +384,56 @@ HTML_CONTENT = """<!DOCTYPE html>
             --color-end: #ffb347;
             --color-success: #2ecc71;
             --color-danger: #e74c3c;
+        }
+
+        /* Premium Toggle Switch */
+        .switch-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .switch-input {
+            display: none;
+        }
+
+        .switch-track {
+            position: relative;
+            width: 38px;
+            height: 20px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border-panel);
+            border-radius: 100px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .switch-thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            background-color: var(--text-muted);
+            border-radius: 50%;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .switch-input:checked + .switch-track {
+            background-color: rgba(102, 252, 241, 0.2);
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        .switch-input:checked + .switch-track .switch-thumb {
+            left: 20px;
+            background-color: var(--accent-blue);
+            box-shadow: 0 0 6px var(--accent-blue);
         }
 
         body {
@@ -1006,6 +1155,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
             <span id="orchestrator-status-label" style="font-size:11px; color:var(--text-muted);"></span>
+            <button id="btn-close-all-clients" onclick="closeAllClients()" title="Force close all running EQ clients (eqgame.exe)" style="background:rgba(231,76,60,0.15); border:1px solid rgba(231,76,60,0.5); color:#ff6b6b; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;">&#x2716; Close All Clients</button>
             <button id="btn-restart-orchestrator" onclick="restartOrchestrator()" title="Restart the orchestrator process" style="background:rgba(255,179,71,0.12); border:1px solid rgba(255,179,71,0.4); color:#ffb347; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;">&#x21BA; Restart</button>
             <button id="btn-stop-orchestrator" onclick="stopOrchestrator()" title="Stop the orchestrator process" style="background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); color:#e74c3c; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;">&#x25A0; Stop</button>
         </div>
@@ -1040,7 +1190,16 @@ HTML_CONTENT = """<!DOCTYPE html>
                             <button onclick="launchSingleChar()">Launch Character</button>
                         </div>
                     </div>
-                    <span id="launch-status" style="color:var(--accent-blue); font-size:13px; font-weight:600;"></span>
+                    <div style="display:flex; align-items:center; gap:20px;">
+                        <label class="switch-container" title="Automatically restart box clients that crash or go offline">
+                            <input type="checkbox" class="switch-input" id="auto-restart-toggle" onchange="updateAutoRestart(this.checked)">
+                            <div class="switch-track">
+                                <div class="switch-thumb"></div>
+                            </div>
+                            <span>Auto-Restart Crashed</span>
+                        </label>
+                        <span id="launch-status" style="color:var(--accent-blue); font-size:13px; font-weight:600;"></span>
+                    </div>
                 </div>
             </div>
 
@@ -2135,6 +2294,28 @@ HTML_CONTENT = """<!DOCTYPE html>
                 }
             }, 1000);
             }, 2000);
+        }
+
+        async function closeAllClients() {
+            if (!confirm('Force close all running EverQuest clients? This will terminate all eqgame.exe instances immediately.')) return;
+            const label = document.getElementById('orchestrator-status-label');
+            label.style.color = '#ff4444';
+            label.innerText = 'Closing all clients...';
+            try {
+                const res = await fetch('/close_all_clients', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    label.style.color = 'var(--color-success)';
+                    label.innerText = 'All EQ clients terminated successfully.';
+                    setTimeout(() => label.innerText = '', 3000);
+                } else {
+                    label.style.color = 'var(--color-danger)';
+                    label.innerText = 'Error terminating clients.';
+                }
+            } catch(e) {
+                label.style.color = 'var(--color-danger)';
+                label.innerText = 'Network error closing clients.';
+            }
         }
 
         async function fetchGroups() {
@@ -4038,10 +4219,31 @@ HTML_CONTENT = """<!DOCTYPE html>
             setTimeout(checkCrashes, 2000);
         }
 
+        async function fetchAutoRestart() {
+            try {
+                const res = await fetch('/get_auto_restart');
+                const data = await res.json();
+                document.getElementById('auto-restart-toggle').checked = !!data.auto_restart;
+            } catch(e) {}
+        }
+
+        async function updateAutoRestart(checked) {
+            try {
+                await fetch('/set_auto_restart', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({auto_restart: checked})
+                });
+            } catch(e) {
+                console.error("Failed to update auto-restart:", e);
+            }
+        }
+
         // Initialize metadata and polls
         fetchGroups();
         fetchCreatorMetadata();
         fetchCharactersList();
+        fetchAutoRestart();
         
         async function updateEqbcChat() {
             try {
@@ -4521,10 +4723,11 @@ import select
 from collections import deque
 
 class EQBCClient:
-    def __init__(self, host='127.0.0.1', port=2112, name='Orchestrator'):
+    def __init__(self, host='127.0.0.1', port=2112, name='Orchestrator', server_prefix='dodl'):
         self.host = host
         self.port = port
         self.name = name
+        self.server_prefix = server_prefix
         self.sock = None
         self.running = False
         self.chat_history = deque(maxlen=100)
@@ -4546,7 +4749,8 @@ class EQBCClient:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect((self.host, self.port))
-                self.sock.sendall(f"login={self.name};\n".encode('utf-8'))
+                login_str = f"login={self.server_prefix}.{self.name};\r\n" if self.server_prefix else f"login={self.name};\r\n"
+                self.sock.sendall(login_str.encode('utf-8'))
                 self.chat_history.append(f"[System] Connected to EQBCS at {self.host}:{self.port}")
                 
                 while self.running:
@@ -4573,7 +4777,7 @@ class EQBCClient:
     def send_command(self, cmd):
         if self.sock and self.running:
             try:
-                self.sock.sendall(f"{cmd}\n".encode('utf-8'))
+                self.sock.sendall(f"{cmd}\r\n".encode('utf-8'))
                 return True
             except Exception as e:
                 print(f"EQBC send failed: {e}. Dropping connection to force reconnect.")
@@ -4596,7 +4800,7 @@ def start_eqbcs():
                 return
     except: pass
 
-    eqbcs_path = r"C:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\EQBCS.exe"
+    eqbcs_path = os.path.join(BASE_DIR, "MacroQuestRof2", "EQBCS.exe")
     if os.path.exists(eqbcs_path):
         try:
             print("Starting EQBCS.exe...")
@@ -4808,6 +5012,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"crashes": list(CRASHED_SESSIONS)}).encode())
+            
+        elif parsed_path.path == "/get_auto_restart":
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"auto_restart": AUTO_RESTART_CRASHED}).encode())
             
         elif parsed_path.path == "/eqbc_chat":
             data = {"chat": list(EQBC_CLIENT.chat_history)}
@@ -5167,7 +5377,50 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             data = {}
 
-        if self.path == "/dismiss_crashes":
+        if self.path == "/set_auto_restart":
+            global AUTO_RESTART_CRASHED
+            val = data.get("auto_restart", False)
+            AUTO_RESTART_CRASHED = bool(val)
+            
+            config_paths = [
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+            ]
+            for path in config_paths:
+                try:
+                    existing_cfg = {}
+                    if os.path.exists(path):
+                        try:
+                            with open(path, "r") as r:
+                                existing_cfg = json.load(r)
+                        except:
+                            pass
+                    existing_cfg["auto_restart_crashed"] = AUTO_RESTART_CRASHED
+                    with open(path, "w") as f:
+                        json.dump(existing_cfg, f, indent=4)
+                except Exception as e:
+                    print(f"Error saving auto-restart config to {path}: {e}")
+            
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True, "auto_restart": AUTO_RESTART_CRASHED}).encode())
+            
+        elif self.path == "/close_all_clients":
+            try:
+                subprocess.call(["taskkill", "/f", "/im", "eqgame.exe"], shell=True)
+            except Exception as e:
+                print("Error killing eqgame.exe:", e)
+                
+            ACTIVE_SESSIONS.clear()
+            CRASHED_SESSIONS.clear()
+            
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True}).encode())
+            
+        elif self.path == "/dismiss_crashes":
             CRASHED_SESSIONS.clear()
             self.send_response(200)
             self.send_header("Content-type", "application/json")
@@ -5313,24 +5566,21 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"{}")
             
         elif self.path == "/cmd/launch_ae_cohort":
-            # Spin up a thread so we don't block the UI while 18 clients launch
+            # Spin up a thread so we don't block the UI while 24 clients launch
             def _launch_ae():
                 try:
                     conn = sqlite3.connect(DEFAULT_LOGIN_DB)
                     c = conn.cursor()
                     c.execute("""
-                        SELECT c.character, p.custom_client_ini, c.server, p.sort_order 
+                        SELECT c.character, p.custom_client_ini, c.server, p.sort_order, p.eq_path 
                         FROM profiles p 
                         JOIN characters c ON p.character_id = c.id 
                         JOIN profile_groups pg ON p.group_id = pg.id
-                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3')
+                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3', 'AE_Cohort_G4')
                         ORDER BY pg.name, p.sort_order
                     """)
                     profiles = c.fetchall()
                     conn.close()
-                    
-                    eq_path = DEFAULT_EQ_PATH
-                    working_dir = os.path.dirname(eq_path)
                     
                     if not profiles:
                         print("No profiles found for AE Cohort groups!")
@@ -5343,6 +5593,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         char_name = p[0]
                         custom_client_ini = p[1]
                         server = p[2]
+                        char_eq_path = p[4]
+                        
+                        if not char_eq_path or not os.path.exists(char_eq_path):
+                            char_eq_path = DEFAULT_EQ_PATH
                         
                         if char_name:
                             if char_name.lower() in online_chars:
@@ -5351,13 +5605,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 continue
                                 
                             ACTIVE_SESSIONS[char_name.lower()] = time.time()
-                            cmd_str = get_native_launch_cmd(char_name, eq_path, custom_client_ini, server)
+                            cmd_str = get_native_launch_cmd(char_name, char_eq_path, custom_client_ini, server)
                             print(f"Launching {char_name}: {cmd_str}")
                             
-                            working_dir = os.path.dirname(eq_path)
+                            working_dir = os.path.dirname(char_eq_path)
                             subprocess.Popen(cmd_str, shell=True, cwd=working_dir)
                             if idx < len(profiles) - 1:
-                                time.sleep(8)
+                                time.sleep(3)
                                 
                     # Once all launch processes are spawned, start a monitor to form the raid
                     def _auto_form_ae_raid(expected):
@@ -5381,10 +5635,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 g1 = expected[0:6]
                                 g2 = expected[6:12]
                                 g3 = expected[12:18]
+                                g4 = expected[18:24]
                                 
                                 # Generate and write the autonomous Lua script
-                                lua_script = generate_auto_raid_lua(g1, g2, g3)
-                                lua_path = r"c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\lua\auto_raid.lua"
+                                lua_script = generate_auto_raid_lua(g1, g2, g3, g4)
+                                lua_path = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "auto_raid.lua")
                                 try:
                                     with open(lua_path, "w") as f:
                                         f.write(lua_script)
@@ -5401,7 +5656,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                                     print("[AutoRaid] Raid formation complete.")
                                     
                                 threading.Thread(target=delayed_ma_set, daemon=True).start()
-                                return
                                 return
                             time.sleep(3)
                     
@@ -5424,7 +5678,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         FROM profiles p 
                         JOIN characters c ON p.character_id = c.id 
                         JOIN profile_groups pg ON p.group_id = pg.id
-                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3')
+                        WHERE pg.name IN ('AE_Cohort_G1', 'AE_Cohort_G2', 'AE_Cohort_G3', 'AE_Cohort_G4')
                         ORDER BY pg.name, p.sort_order
                     """)
                     cohort = [row[0].capitalize() for row in c.fetchall()]
@@ -5435,10 +5689,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     g1 = cohort[0:6]
                     g2 = cohort[6:12]
                     g3 = cohort[12:18]
+                    g4 = cohort[18:24]
                     
                     # Generate and write the autonomous Lua script
-                    lua_script = generate_auto_raid_lua(g1, g2, g3)
-                    lua_path = r"c:\Users\sigha\OneDrive\Documents\eqemus\MacroQuestRof2\lua\auto_raid.lua"
+                    lua_script = generate_auto_raid_lua(g1, g2, g3, g4)
+                    lua_path = os.path.join(BASE_DIR, "MacroQuestRof2", "lua", "auto_raid.lua")
                     try:
                         with open(lua_path, "w") as f:
                             f.write(lua_script)
@@ -6296,7 +6551,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 online_chars.add(c_name.lower())
                     except: pass
                 for s, launch_time in ACTIVE_SESSIONS.items():
-                    if time.time() - launch_time < 60:
+                    if time.time() - launch_time < LAUNCH_GRACE_PERIOD:
                         continue
                     if s.lower() not in online_chars:
                         crashed.append(s.capitalize())
@@ -6769,8 +7024,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                     ]
                     for path in config_paths:
                         try:
+                            existing_cfg = {}
+                            if os.path.exists(path):
+                                try:
+                                    with open(path, "r") as r:
+                                        existing_cfg = json.load(r)
+                                except:
+                                    pass
+                            existing_cfg.update(config_data)
                             with open(path, "w") as f:
-                                json.dump(config_data, f, indent=4)
+                                json.dump(existing_cfg, f, indent=4)
                         except:
                             pass
                         
@@ -6908,6 +7171,144 @@ class RequestHandler(BaseHTTPRequestHandler):
         write_cmd(char, cmd)
 
 if __name__ == "__main__":
+    try:
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 1. Backup and check rgmercs_config.db
+        def check_db_integrity(db_file):
+            try:
+                conn = sqlite3.connect(db_file)
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA integrity_check;")
+                row = cursor.fetchone()
+                conn.close()
+                if row and row[0] == 'ok':
+                    return True
+                return False
+            except Exception as ex:
+                print(f"Startup: Error checking DB integrity for {db_file}: {ex}")
+                return False
+
+        db_path = os.path.join(BASE_DIR, "MacroQuestRof2", "config", "rgmercs", "rgmercs_config.db")
+        if os.path.exists(db_path):
+            is_healthy = check_db_integrity(db_path)
+            if not is_healthy:
+                print(f"Startup: Warning! rgmercs_config.db is not healthy or corrupted. Attempting auto-restore...")
+                
+                # Locate backups
+                db_dir = os.path.dirname(db_path)
+                backups = glob.glob(os.path.join(db_dir, "rgmercs_config_backup_*.db"))
+                # Sort by modification time, newest first
+                backups.sort(key=os.path.getmtime, reverse=True)
+                
+                restored = False
+                for backup in backups:
+                    if check_db_integrity(backup):
+                        print(f"Startup: Found healthy backup: {backup}. Restoring...")
+                        corrupt_dest = os.path.join(db_dir, f"rgmercs_config.db.corrupt_{timestamp}")
+                        
+                        # Check lock status of database and journal files
+                        files_to_check = [db_path, db_path + "-wal", db_path + "-shm"]
+                        locked = False
+                        for f_path in files_to_check:
+                            if os.path.exists(f_path):
+                                try:
+                                    # Attempt a temporary rename to see if it is locked
+                                    temp_rename = f_path + f".test_{timestamp}"
+                                    os.rename(f_path, temp_rename)
+                                    os.rename(temp_rename, f_path) # rename back
+                                except Exception as lock_err:
+                                    print(f"Startup: File {f_path} is locked by another process: {lock_err}")
+                                    locked = True
+                                    break
+                        
+                        if locked:
+                            print("Startup: CRITICAL ERROR - Cannot restore database because file(s) are locked!")
+                            print("Startup: Please close all EverQuest and MacroQuest instances, then restart Orchestrator.")
+                            break
+                        
+                        try:
+                            os.rename(db_path, corrupt_dest)
+                            print(f"Startup: Renamed corrupted db to {corrupt_dest}")
+                        except Exception as rename_err:
+                            print(f"Startup: Failed to rename corrupt db: {rename_err}")
+                        
+                        # Also handle any stale -wal or -shm files if they exist to prevent them from corrupting the restored DB
+                        for suffix in ["-wal", "-shm"]:
+                            ext_path = db_path + suffix
+                            if os.path.exists(ext_path):
+                                corrupt_ext_path = corrupt_dest + suffix
+                                try:
+                                    os.rename(ext_path, corrupt_ext_path)
+                                    print(f"Startup: Moved stale {suffix} file to {corrupt_ext_path}")
+                                except Exception as ext_err:
+                                    print(f"Startup: Failed to rename {suffix} file: {ext_err}")
+                                    try:
+                                        os.remove(ext_path)
+                                        print(f"Startup: Removed stale {suffix} file: {ext_path}")
+                                    except Exception as del_err:
+                                        print(f"Startup: Failed to delete {suffix} file: {del_err}")
+                        
+                        # Copy healthy backup to db_path
+                        try:
+                            shutil.copy(backup, db_path)
+                            print(f"Startup: Successfully restored database from {backup}")
+                            restored = True
+                            break
+                        except Exception as copy_err:
+                            print(f"Startup: Failed to copy backup to database path: {copy_err}")
+                    else:
+                        print(f"Startup: Backup {backup} is also corrupted/unhealthy. Skipping...")
+                
+                if not restored:
+                    print("Startup: Critical! No healthy backups found. Unable to restore database.")
+            
+            # Create a backup of the current (now healthy or verified) db
+            backup_path = os.path.join(BASE_DIR, "MacroQuestRof2", "config", "rgmercs", f"rgmercs_config_backup_{timestamp}.db")
+            try:
+                # Use sqlite3 backup API for a consistent online backup if possible
+                src_conn = sqlite3.connect(db_path)
+                dest_conn = sqlite3.connect(backup_path)
+                src_conn.backup(dest_conn)
+                dest_conn.close()
+                src_conn.close()
+                print(f"Startup: Created consistent SQLite backup of rgmercs db at {backup_path}")
+            except Exception as backup_api_err:
+                print(f"Startup: SQLite backup API failed: {backup_api_err}. Falling back to copy...")
+                try:
+                    shutil.copy(db_path, backup_path)
+                    print(f"Startup: Created backup of rgmercs db at {backup_path} via copy")
+                except Exception as copy_err:
+                    print(f"Startup: Failed to backup database: {copy_err}")
+        else:
+            print(f"Startup: rgmercs db not found at {db_path}, skipping backup.")
+
+            
+        # 2. Backup LootNScoot configs directory
+        lns_config_dir = os.path.join(BASE_DIR, "MacroQuestRof2", "config", "LootNScoot")
+        if os.path.exists(lns_config_dir):
+            lns_config_backup = os.path.join(BASE_DIR, "MacroQuestRof2", "config", f"LootNScoot_backup_{timestamp}")
+            shutil.copytree(lns_config_dir, lns_config_backup)
+            print(f"Startup: Created backup of LootNScoot configs at {lns_config_backup}")
+            
+        # 3. Backup Looted configs directory if it exists
+        looted_config_dir = os.path.join(BASE_DIR, "MacroQuestRof2", "config", "Looted")
+        if os.path.exists(looted_config_dir):
+            looted_config_backup = os.path.join(BASE_DIR, "MacroQuestRof2", "config", f"Looted_backup_{timestamp}")
+            shutil.copytree(looted_config_dir, looted_config_backup)
+            print(f"Startup: Created backup of Looted configs at {looted_config_backup}")
+            
+        # 4. Backup LootNScoot databases/resources directory
+        lns_resources_dir = os.path.join(BASE_DIR, "MacroQuestRof2", "resources", "LootNScoot")
+        if os.path.exists(lns_resources_dir):
+            lns_resources_backup = os.path.join(BASE_DIR, "MacroQuestRof2", "resources", f"LootNScoot_backup_{timestamp}")
+            shutil.copytree(lns_resources_dir, lns_resources_backup)
+            print(f"Startup: Created backup of LootNScoot resources/databases at {lns_resources_backup}")
+            
+    except Exception as e:
+        print(f"Startup: Failed to perform startup backups: {e}")
+
     start_eqbcs()
     EQBC_CLIENT.start()
     if not os.path.exists(COMMANDS_DIR):
@@ -6951,7 +7352,9 @@ if __name__ == "__main__":
                                 connection_config[k] = int(cfg[k])
                             else:
                                 connection_config[k] = str(cfg[k])
+                    AUTO_RESTART_CRASHED = bool(cfg.get("auto_restart_crashed", False))
                     print("Startup: Loaded database settings from", cfg_path)
+                    print("Startup: Loaded auto_restart_crashed =", AUTO_RESTART_CRASHED)
                     break
             except Exception as e:
                 print("Error loading config on startup:", e)

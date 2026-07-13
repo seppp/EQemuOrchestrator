@@ -37,7 +37,7 @@ local _ClassConfig = {
                 name = "RezSpell",
                 cond = function(self, spell, target)
                     return Casting.DowntimeRezOkay()
-                        and not Casting.CanUseAA('Blessing of Resurrection')
+                        and not Casting.AAReady('Blessing of Resurrection')
                 end,
             },
         },
@@ -419,7 +419,9 @@ local _ClassConfig = {
             "Revive",
             "Reparation",
             "Reconstitution",
+            "Reconstitute",
             "Reanimation",
+            "Reanimate",
         },
         ['AERezSpell'] = {
             "Superior Healing",
@@ -1313,6 +1315,7 @@ local _ClassConfig = {
                 type = "Spell",
                 load_cond = function(self) return Config:GetSetting('AegoSymbol') <= 2 end,
                 cond = function(self, spell, target)
+                    if Casting.TargetHasBuffList(target, Casting.DruidSkinBuffs) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },
@@ -1321,6 +1324,7 @@ local _ClassConfig = {
                 type = "Spell",
                 cond = function(self, spell, target)
                     if Config:GetSetting('AegoSymbol') == (1 or 4) or ((spell.TargetType() or ""):lower() == "single" and target.ID() ~= Core.GetMainAssistId()) then return false end
+                    if Casting.TargetHasBuffList(target, Casting.ClericAegoBuffs) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },
@@ -1424,7 +1428,7 @@ local _ClassConfig = {
                 { name = "HealNuke3",       cond = function(self) return Config:GetSetting('InterContraChoice') == 1 end, },
                 { name = "NukeHeal3",       cond = function(self) return Config:GetSetting('InterContraChoice') == 3 end, },
                 { name = "Renewal3",        cond = function(self) return mq.TLO.Me.Level() < 101 end, },
-                { name = "RezSpell",        cond = function(self) return not Casting.CanUseAA('Blessing of Resurrection') end, },
+                { name = "RezSpell",        cond = function(self) return not Casting.AAReady('Blessing of Resurrection') end, },
             },
         },
     },
